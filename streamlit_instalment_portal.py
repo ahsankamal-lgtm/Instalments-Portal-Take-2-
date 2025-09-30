@@ -1,78 +1,6 @@
-# streamlit_ev_portal.py
+# streamlit_ev_portal_nodb.py
 import re
-import os
-from datetime import datetime
-
-import pandas as pd
 import streamlit as st
-from sqlalchemy import create_engine, text
-
-# ----------------------------
-# Configuration / DB credentials
-# ----------------------------
-USE_ENV_DB = True
-DATABASE_URL = os.getenv("DATABASE_URL")
-
-DB_USER = "ahsan"
-DB_PASS = "ahsan@321"
-DB_HOST = "3.17.21.91"
-DB_NAME = "ev_installment_project"
-DB_DRIVER = "pymysql"
-
-if not DATABASE_URL:
-    DATABASE_URL = f"mysql+{DB_DRIVER}://{DB_USER}:{DB_PASS}@{DB_HOST}/{DB_NAME}"
-
-engine = create_engine(DATABASE_URL, pool_pre_ping=True)
-
-# ----------------------------
-# Helper: Create table if not exists
-# ----------------------------
-CREATE_TABLE_SQL = """
-CREATE TABLE IF NOT EXISTS data (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    first_name VARCHAR(50) NOT NULL,
-    last_name VARCHAR(50) NOT NULL,
-    address VARCHAR(255),
-    cnic VARCHAR(20) UNIQUE NOT NULL,
-    driving_license VARCHAR(50),
-    electricity_bills_submitted BOOLEAN,
-    gender ENUM('Male','Female') NOT NULL,
-    guarantor_male BOOLEAN NOT NULL,
-    guarantor_female BOOLEAN NOT NULL,
-    net_salary INT NOT NULL,
-    avg_balance INT NOT NULL,
-    installment_amount INT NOT NULL,
-    bike_type VARCHAR(50),
-    bike_price INT,
-    outstanding_loan INT,
-    income_score FLOAT,
-    bank_balance_score FLOAT,
-    salary_consistency_score FLOAT,
-    employer_type_score FLOAT,
-    job_tenure_score FLOAT,
-    age_score FLOAT,
-    dependents_score FLOAT,
-    residence_score FLOAT,
-    dti_ratio FLOAT,
-    dti_score FLOAT,
-    final_score FLOAT,
-    decision VARCHAR(20),
-    decision_reasons TEXT,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-) ENGINE=InnoDB;
-"""
-
-def ensure_table():
-    try:
-        with engine.begin() as conn:
-            conn.execute(text(CREATE_TABLE_SQL))
-    except Exception as e:
-        st.error(f"Failed to ensure DB table exists: {e}")
-
-try:
-    ensure_table()
-except Exception:
-    pass
 
 # ----------------------------
 # Utility
@@ -98,7 +26,7 @@ def parse_int_amount(text: str) -> int:
         return 0
 
 # ----------------------------
-# Scoring functions (same as before)
+# Scoring functions
 # ----------------------------
 def income_score(net_salary, gender):
     if net_salary < 50000:
@@ -253,7 +181,6 @@ if st.session_state.page == "applicant":
             errors.append("CNIC must match 12345-1234567-1 format.")
         if not validate_license_suffix(license_suffix):
             errors.append("License suffix must be exactly 3 alphanumeric characters.")
-
         if not (guarantor_male and guarantor_female):
             errors.append("Two guarantors required (at least one female).")
 
@@ -275,3 +202,5 @@ if st.session_state.page == "applicant":
             }
             st.session_state.page = "scoring"
             st.experimental_rerun()
+
+# (Page 2 = scoring, Page 3 = results will follow exactly as we structured earlier)
