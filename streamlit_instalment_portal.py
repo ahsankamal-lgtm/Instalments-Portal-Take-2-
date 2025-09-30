@@ -1,47 +1,42 @@
-import re
 import streamlit as st
 import pandas as pd
-from sqlalchemy import create_engine, Column, Integer, Float, String, Boolean, DateTime, MetaData, Table
-from sqlalchemy.orm import sessionmaker
-from datetime import datetime
-import os
+import mysql.connector
+from mysql.connector import Error
+import re
 
-# ===============================
-# Database Setup
-# ===============================
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///customers.db")
-engine = create_engine(DATABASE_URL)
-metadata = MetaData()
+# ============= Wavetec Branding =============
+st.set_page_config(page_title="Wavetec EV Installment Portal", layout="centered")
+st.title("Wavetec Electric Bike Installment Portal")
 
-customers_table = Table(
-    "customers", metadata,
-    Column("id", Integer, primary_key=True),
-    Column("first_name", String),
-    Column("last_name", String),
-    Column("address", String),
-    Column("cnic", String, unique=True),
-    Column("license", String),
-    Column("electricity_bills", Boolean),
-    Column("guarantors_available", Boolean),
-    Column("gender", String),
-    Column("net_salary", Integer),
-    Column("avg_balance", Integer),
-    Column("instalment", Integer),
-    Column("income_score", Float),
-    Column("adjusted_income_score", Float),
-    Column("balance_score", Float),
-    Column("final_score", Float),
-    Column("decision", String),
-    Column("reason", String),
-    Column("created_at", DateTime, default=datetime.utcnow),
-)
+# Optional logo (uncomment when you upload logo.png into same folder)
+# st.image("logo.png", width=200)
 
-metadata.create_all(engine)
-Session = sessionmaker(bind=engine)
+st.markdown("""
+This portal helps evaluate applicants for Wavetec's **Electric Bike Installment Program**.  
+Applicants are assessed using a transparent scoring system, and approved customers are stored in a secure database.
+""")
 
-# ===============================
-# Scoring Functions
-# ===============================
+# ============= Database Connection Function =============
+def get_connection():
+    try:
+        conn = mysql.connector.connect(
+            host="3.17.21.91",
+            user="ahsan",
+            password="ahsan@321",
+            database="ev_installment_project"
+        )
+        return conn
+    except Error as e:
+        st.error(f"Database connection failed: {e}")
+        return None
+
+# ============= Input Validation =============
+def validate_cnic(cnic):
+    """Check if CNIC matches XXXXX-XXXXXXX-X"""
+    pattern = r"^\d{5}-\d{7}-\d{1}$"
+    return re.match(pattern, cnic)
+
+# ============= Scoring Functions =============
 def income_score(net_salary: float) -> float:
     if net_salary < 50000:
         return 0
@@ -60,13 +55,11 @@ def adjusted_income_score(net_salary: float, gender: str) -> float:
         return min(base * 1.10, 100)
     return base
 
-def balance_score(avg_balance: float, instalment: float = 10000) -> float:
+def balance_score(avg_balance: float, instalment: float) -> float:
     target = 3 * instalment
-    if avg_balance >= target:
-        return 100
-    return (avg_balance / target) * 100
+    return 100 if avg_balance >= target else (avg_balance / target) * 100
 
-def final_score(net_salary: float, gender: str, avg_balance: float, instalment: float = 10000) -> float:
+def final_score(net_salary: float, gender: str, avg_balance: float, instalment: float) -> float:
     inc = adjusted_income_score(net_salary, gender)
     bal = balance_score(avg_balance, instalment)
     return 0.60 * inc + 0.40 * bal
@@ -79,153 +72,98 @@ def decision(final: float) -> str:
     else:
         return "Reject"
 
-def reasoning(net_salary, gender, avg_balance, instalment, final):
-    reasons = []
-    if net_salary < 50000:
-        reasons.append("Net salary below safe lending threshold (PKR 50,000).")
-    if avg_balance < 3 * instalment:
-        reasons.append("Bank balance insufficient to cover 3× instalment amount.")
-    if gender.upper() == "F":
-        reasons.append("Female applicant – positive adjustment applied for income stability.")
-    if final >= 75:
-        reasons.append("Strong financial standing: meets salary and balance criteria.")
-    elif 60 <= final < 75:
-        reasons.append("Moderate financial standing: requires manual review to mitigate risk.")
+# ============= Step 1: Applicant Information =============
+st.header("Step 1: Applicant Information")
+
+col1, col2 = st.columns(2)
+first_name = col1.text_input("First Name")
+last_name = col2.text_input("Last Name")
+
+address = st.text_area("Residential Address")
+
+cnic = st.text_input("CNIC (XXXXX-XXXXXXX-X)")
+if cnic and not validate_cnic(cnic):
+    st.error("Enter valid CNIC in format XXXXX-XXXXXXX-X")
+
+driving_license = st.text_input("Driving License Number (numeric)")
+electricity_bills = st.selectbox("Submitted Electricity Bills?", ["Yes", "No"])
+gender = st.radio("Gender", ["M", "F"])
+guarantors = st.radio("Two Guarantors (at least one female)?", ["Yes", "No"])
+
+if st.button("Confirm Applicant Information"):
+    if not first_name or not last_name or not cnic or not driving_license:
+        st.error("Please fill in all required fields.")
+    elif not validate_cnic(cnic):
+        st.error("Invalid CNIC format.")
+    elif guarantors == "No":
+        st.error("Applicant must have 2 guarantors (including 1 female).")
     else:
-        reasons.append("High risk: insufficient salary or bank balance for repayment capacity.")
-    return " ".join(reasons)
+        st.success("Applicant information confirmed. Proceed to scoring below.")
 
-# ===============================
-# Streamlit App
-# ===============================
-st.set_page_config(page_title="Electric Bike Loan Scoring Portal", layout="wide")
+# ============= Step 2: Scoring =============
+st.header("Step 2: Score Calculator")
 
-if "page" not in st.session_state:
-    st.session_state.page = "form"
+salary_input = st.text_input("Net Salary (PKR)", value="0")
+balance_input = st.text_input("Average 6 Months Balance (PKR)", value="0")
+instalment = st.number_input("Installment Amount (PKR)", value=10000, step=1000)
 
-st.title("⚡ Electric Bike Loan Scoring Portal")
+# Format input with commas
+def parse_amount(x):
+    return int(x.replace(",", "")) if x else 0
 
-# -------------------------------
-# PAGE 1: Applicant Information
-# -------------------------------
-if st.session_state.page == "form":
-    st.header("Step 1: Applicant Information")
-
-    first_name = st.text_input("First Name")
-    last_name = st.text_input("Last Name")
-    address = st.text_area("Residential Address")
-    cnic = st.text_input("CNIC Number (XXXXX-XXXXXXX-X)")
-    license_num = st.text_input("Driving License Number")
-    electricity_bills = st.radio("Electricity Bills Submitted?", ["Yes", "No"])
-    guarantors = st.radio("Two guarantors available (at least one female)?", ["Yes", "No"])
-    gender = st.radio("Gender", ["M", "F"])
-
-    # Validation
-    errors = []
-    if cnic and not re.match(r"^\d{5}-\d{7}-\d{1}$", cnic):
-        errors.append("CNIC format is invalid. Use XXXXX-XXXXXXX-X")
-
-    if st.button("Next"):
-        if errors:
-            for e in errors:
-                st.error(e)
-        elif not all([first_name, last_name, address, cnic, license_num]):
-            st.error("All fields are required.")
-        else:
-            st.session_state.applicant = {
-                "first_name": first_name,
-                "last_name": last_name,
-                "address": address,
-                "cnic": cnic,
-                "license": license_num,
-                "electricity_bills": electricity_bills == "Yes",
-                "guarantors": guarantors == "Yes",
-                "gender": gender,
-            }
-            st.session_state.page = "scoring"
-            st.experimental_rerun()
-
-# -------------------------------
-# PAGE 2: Scoring Calculator
-# -------------------------------
-elif st.session_state.page == "scoring":
-    st.header("Step 2: Scoring Calculator")
-
-    salary_input = st.text_input("Net Salary (PKR)", value="0")
-    balance_input = st.text_input("6-month Avg Bank Balance (PKR)", value="0")
-    instalment = st.number_input("Installment Amount (PKR)", min_value=5000, step=1000, value=10000)
-
-    def parse_amount(text):
-        try:
-            return int(text.replace(",", "").strip())
-        except:
-            return 0
-
+try:
     net_salary = parse_amount(salary_input)
     avg_balance = parse_amount(balance_input)
-    gender = st.session_state.applicant["gender"]
+    salary_display = f"{net_salary:,}"
+    balance_display = f"{avg_balance:,}"
+    st.write(f"Net Salary Entered: PKR {salary_display}")
+    st.write(f"6-Month Avg Balance: PKR {balance_display}")
 
-    if st.button("Calculate Score"):
+    if net_salary > 0 and avg_balance > 0:
         inc_score = income_score(net_salary)
         adj_inc_score = adjusted_income_score(net_salary, gender)
         bal_score = balance_score(avg_balance, instalment)
         final = final_score(net_salary, gender, avg_balance, instalment)
         result = decision(final)
-        reason = reasoning(net_salary, gender, avg_balance, instalment, final)
 
-        st.subheader("📊 Results")
-        st.write(f"**Base Income Score:** {inc_score:.2f}")
-        st.write(f"**Adjusted Income Score:** {adj_inc_score:.2f}")
-        st.write(f"**Balance Score:** {bal_score:.2f}")
-        st.write(f"**Final Score:** {final:.2f}")
-        st.write(f"**Decision:** {result}")
-        st.info(f"**Reasoning:** {reason}")
+        st.subheader("Scoring Results")
+        st.write(f"Base Income Score: {inc_score:.2f}")
+        st.write(f"Adjusted Income Score: {adj_inc_score:.2f}")
+        st.write(f"Balance Score: {bal_score:.2f}")
+        st.write(f"Final Score: {final:.2f}")
+        st.write(f"Decision: **{result}**")
 
-        # Save to DB
-        session = Session()
-        new_customer = {
-            "first_name": st.session_state.applicant["first_name"],
-            "last_name": st.session_state.applicant["last_name"],
-            "address": st.session_state.applicant["address"],
-            "cnic": st.session_state.applicant["cnic"],
-            "license": st.session_state.applicant["license"],
-            "electricity_bills": st.session_state.applicant["electricity_bills"],
-            "guarantors_available": st.session_state.applicant["guarantors"],
-            "gender": gender,
-            "net_salary": net_salary,
-            "avg_balance": avg_balance,
-            "instalment": instalment,
-            "income_score": inc_score,
-            "adjusted_income_score": adj_inc_score,
-            "balance_score": bal_score,
-            "final_score": final,
-            "decision": result,
-            "reason": reason,
-            "created_at": datetime.utcnow()
-        }
-        session.execute(customers_table.insert().values(new_customer))
-        session.commit()
-        session.close()
+        # Expert-style reasoning
+        st.subheader("Decision Reasoning")
+        if result == "Approve":
+            st.success("Approved: Applicant has sufficient income and balance stability, reducing risk of default.")
+        elif result == "Manual Review":
+            st.warning("Manual Review: Applicant’s financials are borderline. Additional verification is recommended.")
+        else:
+            st.error("Rejected: Insufficient salary or balance history. High risk of default.")
 
-        st.success("✅ Applicant added to database")
+        # ============= Save to Database if Approved =============
+        if result == "Approve":
+            if st.button("Save Approved Applicant to Database"):
+                conn = get_connection()
+                if conn:
+                    try:
+                        cursor = conn.cursor()
+                        insert_query = """
+                        INSERT INTO data (first_name, last_name, address, cnic, driving_license, electricity_bills, gender, guarantors, net_salary, avg_balance, instalment, final_score, decision)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        """
+                        values = (first_name, last_name, address, cnic, driving_license, electricity_bills, gender, guarantors,
+                                  net_salary, avg_balance, instalment, final, result)
+                        cursor.execute(insert_query, values)
+                        conn.commit()
+                        st.success("Applicant saved successfully to database!")
+                    except Error as e:
+                        st.error(f"Error saving to database: {e}")
+                    finally:
+                        conn.close()
 
-        st.session_state.page = "results"
-        st.experimental_rerun()
+except ValueError:
+    st.error("Enter numeric values for salary and balance (commas allowed).")
 
-# -------------------------------
-# PAGE 3: Results & Database
-# -------------------------------
-elif st.session_state.page == "results":
-    st.header("Step 3: Approved Customers Database")
-
-    session = Session()
-    rows = session.execute(customers_table.select()).fetchall()
-    session.close()
-
-    if rows:
-        df = pd.DataFrame(rows, columns=rows[0].keys())
-        st.dataframe(df)
-        st.download_button("Download CSV", df.to_csv(index=False), "approved_customers.csv")
-    else:
-        st.info("No customers in database yet.")
 
