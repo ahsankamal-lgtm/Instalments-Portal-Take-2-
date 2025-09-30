@@ -1,54 +1,43 @@
-# streamlit_ev_portal.py
-import re
+# streamlit_app.py
+
 import streamlit as st
+import re
+import webbrowser
 
 # -----------------------------
-# Validation helpers
+# Utility Functions
 # -----------------------------
-def validate_cnic(cnic: str) -> bool:
-    return bool(re.match(r"^\d{5}-\d{7}-\d{1}$", cnic.strip()))
 
-def validate_license(license_number: str, cnic: str) -> bool:
-    """License must follow CNIC + #XXX format"""
-    pattern = f"^{re.escape(cnic)} #[0-9]{{3}}$"
-    return bool(re.match(pattern, license_number.strip()))
-
-def parse_int_amount(text: str) -> int:
-    if text is None:
-        return 0
-    s = str(text).replace(",", "").strip()
-    try:
-        return int(float(s))
-    except Exception:
-        return 0
-
-# -----------------------------
-# Scoring functions
-# -----------------------------
 def income_score(net_salary, gender):
+    """Calculate income score with female adjustment"""
     if net_salary < 50000:
-        base = 0
+        base_score = 0
     elif 50000 <= net_salary < 70000:
-        base = 40
+        base_score = 40
     elif 70000 <= net_salary < 90000:
-        base = 60
+        base_score = 60
     elif 90000 <= net_salary < 110000:
-        base = 80
+        base_score = 80
     else:
-        base = 100
+        base_score = 100
+
     if gender == "Female":
-        base *= 1.1
-    return min(base, 100)
+        base_score = min(base_score * 1.1, 100)
+    return base_score
 
-def bank_balance_score(balance, installment_amount):
-    return min((balance / (3 * installment_amount)) * 100, 100)
 
-def salary_consistency_score(months_consistent):
-    return min((months_consistent / 12) * 100, 100)
+def bank_balance_score(balance):
+    return min((balance / 30000) * 100, 100)
 
-def employer_type_score(employer_type):
+
+def salary_consistency_score(months):
+    return min((months / 12) * 100, 100)
+
+
+def employer_type_score(employer):
     mapping = {"Govt": 100, "MNC": 80, "SME": 60, "Startup": 40}
-    return mapping.get(employer_type, 0)
+    return mapping.get(employer, 60)
+
 
 def job_tenure_score(years):
     if years >= 3:
@@ -58,37 +47,40 @@ def job_tenure_score(years):
     else:
         return 40
 
-def age_score(age):
-    if 25 <= age <= 55:
-        return 100
-    else:
-        return 60
 
-def dependents_score(num_dependents):
-    if num_dependents <= 1:
+def age_score(age):
+    return 100 if 25 <= age <= 55 else 60
+
+
+def dependents_score(dependents):
+    if dependents <= 1:
         return 100
-    elif num_dependents == 2:
+    elif dependents == 2:
         return 70
     else:
         return 40
 
-def residence_score(residence_type):
-    return 100 if residence_type == "Owned" else 60
+
+def residence_score(res):
+    return 100 if res == "Owned" else 60
+
 
 def dti_ratio(outstanding, bike_price, net_salary):
     if net_salary <= 0:
-        return 99
+        return float("inf")
     return (outstanding + bike_price) / net_salary
 
-def dti_score(dti):
-    if dti <= 0.5:
+
+def dti_score(ratio):
+    if ratio <= 0.5:
         return 100
-    elif dti <= 1.0:
+    elif ratio <= 1:
         return 70
     else:
         return 40
 
-def weighted_final_score(scores):
+
+def weighted_score(scores):
     weights = {
         "income": 0.40,
         "bank_balance": 0.30,
@@ -105,199 +97,177 @@ def weighted_final_score(scores):
         total += v * weights[k]
     return total
 
+
 def decision(final_score):
-    if final_score >= 70:
+    if final_score >= 75:
         return "Approve"
-    elif 50 <= final_score < 70:
+    elif final_score >= 60:
         return "Review"
     else:
         return "Reject"
 
-def generate_reasons(scores, dti_value, decision_val, applicant):
+
+def decision_reasons(scores, decision_text):
     reasons = []
-
-    # Income
-    if scores["income"] >= 80:
-        reasons.append("Strong income level.")
-    elif scores["income"] >= 60:
-        reasons.append("Moderate income level.")
+    if scores["income"] < 60:
+        reasons.append("Moderate or low income level.")
     else:
-        reasons.append("Low income level.")
-
-    # Bank balance
+        reasons.append("Strong income profile.")
     if scores["bank_balance"] >= 100:
         reasons.append("Bank balance fully meets requirement.")
-    elif scores["bank_balance"] >= 60:
-        reasons.append("Bank balance borderline.")
     else:
         reasons.append("Insufficient bank balance.")
-
-    # DTI
-    if dti_value <= 0.5:
-        reasons.append("Low debt-to-income ratio.")
-    elif dti_value <= 1:
-        reasons.append("Moderate debt-to-income ratio.")
-    else:
+    if scores["dti"] < 70:
         reasons.append("High debt-to-income ratio, risky.")
-
-    # Guarantors
-    if not (applicant.get("guarantor_male") and applicant.get("guarantor_female")):
-        reasons.append("Missing required male/female guarantors.")
-
-    # Electricity bills
-    if not applicant.get("electricity_bills_submitted"):
-        reasons.append("Electricity bills not submitted.")
-
-    # Final decision pointer
-    if decision_val == "Approve":
-        reasons.append("Profile fits approval criteria.")
-    elif decision_val == "Review":
-        reasons.append("Borderline case, manual review advised.")
     else:
-        reasons.append("Does not meet approval criteria.")
+        reasons.append("Debt-to-income ratio acceptable.")
+    if decision_text == "Approve":
+        reasons.append("Profile fits approval criteria.")
+    elif decision_text == "Review":
+        reasons.append("Borderline case, manual review recommended.")
+    else:
+        reasons.append("Fails key eligibility checks.")
+    return reasons
 
-    return list(dict.fromkeys(reasons))  # remove duplicates
 
 # -----------------------------
 # Streamlit App
 # -----------------------------
-st.set_page_config(page_title="Wavetec EV Installment Scoring", layout="wide")
-st.title("Wavetec Electric Bike Installment Portal")
 
-if "page" not in st.session_state:
-    st.session_state.page = "applicant"
-if "applicant" not in st.session_state:
-    st.session_state.applicant = {}
-if "scoring" not in st.session_state:
-    st.session_state.scoring = {}
-if "result" not in st.session_state:
-    st.session_state.result = {}
+st.set_page_config(page_title="Electric Bike Loan Portal", layout="centered")
+st.title("Electric Bike Loan Scoring Portal")
 
-# -------- Page 1: Applicant Info --------
-if st.session_state.page == "applicant":
-    st.header("Step 1 — Applicant Information")
+# Navigation
+page = st.sidebar.radio("Navigation", ["Applicant Info", "Scoring", "Results"])
 
-    col1, col2 = st.columns(2)
-    first_name = col1.text_input("First Name", value=st.session_state.applicant.get("first_name", ""))
-    last_name = col2.text_input("Last Name", value=st.session_state.applicant.get("last_name", ""))
-    address = st.text_area("Residential Address", value=st.session_state.applicant.get("address", ""))
+# Session state
+if "applicant_data" not in st.session_state:
+    st.session_state.applicant_data = {}
+if "scores" not in st.session_state:
+    st.session_state.scores = {}
+if "final_score" not in st.session_state:
+    st.session_state.final_score = 0
+if "decision" not in st.session_state:
+    st.session_state.decision = ""
 
-    cnic = st.text_input("CNIC (12345-1234567-1)", value=st.session_state.applicant.get("cnic", ""))
+# -----------------------------
+# Applicant Info Page
+# -----------------------------
+if page == "Applicant Info":
+    st.subheader("Applicant Information")
 
-    # License auto-prefix with CNIC
-    license_suffix = st.text_input("Driving License Suffix (XXX)", value="")
-    driving_license = f"{cnic} #{license_suffix}" if cnic and license_suffix else ""
-
-    electricity_bills_submitted = st.radio("Electricity Bills Submitted?", ["Yes", "No"])
-    g_col1, g_col2 = st.columns(2)
-    guarantor_male = g_col1.checkbox("Male Guarantor", value=False)
-    guarantor_female = g_col2.checkbox("Female Guarantor", value=False)
+    cnic = st.text_input("CNIC Number (xxxxx-xxxxxxx-x)")
     gender = st.selectbox("Gender", ["Male", "Female"])
+    net_salary = st.number_input("Net Salary", min_value=0, step=1000, format="%d")
+    avg_balance = st.number_input("Average 6M Bank Balance", min_value=0, step=1000, format="%d")
 
-    if st.button("Validate & Continue"):
-        errors = []
-        if not validate_cnic(cnic):
-            errors.append("Invalid CNIC format.")
-        if not validate_license(driving_license, cnic):
-            errors.append("Driving license must match CNIC # XXX format.")
-        if not (guarantor_male and guarantor_female):
-            errors.append("Two guarantors required (at least one female).")
-
-        if errors:
-            for e in errors:
-                st.error(e)
-        else:
-            st.session_state.applicant = {
-                "first_name": first_name,
-                "last_name": last_name,
-                "address": address,
-                "cnic": cnic,
-                "driving_license": driving_license,
-                "electricity_bills_submitted": (electricity_bills_submitted == "Yes"),
-                "guarantor_male": guarantor_male,
-                "guarantor_female": guarantor_female,
-                "gender": gender,
-            }
-            st.session_state.page = "scoring"
-            st.experimental_rerun()
-
-# -------- Page 2: Scoring --------
-elif st.session_state.page == "scoring":
-    st.header("Step 2 — Scoring")
-
-    col1, col2 = st.columns(2)
-    net_salary = col1.number_input("Net Salary (PKR)", min_value=0, step=1000)
-    bank_balance = col2.number_input("Average 6M Bank Balance (PKR)", min_value=0, step=1000)
-
-    months_consistent = st.slider("Salary Consistency (months)", 0, 12, 12)
-    employer_type = st.selectbox("Employer Type", ["Govt", "MNC", "SME", "Startup"])
-    job_tenure_years = st.number_input("Job Tenure (years)", min_value=0, step=1)
+    salary_months = st.number_input("Salary Consistency (Months, 0–12)", min_value=0, max_value=12, step=1)
+    employer = st.selectbox("Employer Type", ["Govt", "MNC", "SME", "Startup"])
+    job_tenure_years = st.number_input("Job Tenure (Years)", min_value=0, step=1)
     age = st.number_input("Age", min_value=18, step=1)
-    dependents = st.number_input("Dependents", min_value=0, step=1)
-    residence_type = st.selectbox("Residence Type", ["Owned", "Rented"])
+    dependents = st.number_input("Number of Dependents", min_value=0, step=1)
+    residence = st.selectbox("Residence", ["Owned", "Rented"])
 
-    installment_amount = st.number_input("Installment Amount (PKR)", min_value=1000, step=500, value=10000)
     bike_type = st.selectbox("Bike Type", ["EV-1", "EV-125"])
-    bike_price = st.number_input("Bike Price (PKR)", min_value=0, step=1000)
-    outstanding_loan = st.number_input("Outstanding Loan (PKR)", min_value=0, step=1000)
+    bike_price = st.number_input("Bike Price", min_value=0, step=1000, format="%d")
+    outstanding = st.number_input("Outstanding Loan", min_value=0, step=1000, format="%d")
 
-    if st.button("Calculate Score"):
+    # Address fields
+    address = st.text_input("Street Address")
+    area = st.text_input("Area")
+    city = st.text_input("City")
+
+    if st.button("View on Google Maps"):
+        query = f"{address}, {area}, {city}"
+        maps_url = f"https://www.google.com/maps/search/?api=1&query={query.replace(' ', '+')}"
+        st.markdown(f"[Open in Google Maps]({maps_url})", unsafe_allow_html=True)
+
+    license_number = st.text_input("Driving License Number (CNIC # XXX)")
+    if license_number and not re.match(rf"^{cnic} #\d{{3}}$", license_number):
+        st.error("License number must match CNIC # XXX format.")
+
+    if st.button("Save Applicant Info"):
+        st.session_state.applicant_data = {
+            "cnic": cnic,
+            "gender": gender,
+            "net_salary": net_salary,
+            "avg_balance": avg_balance,
+            "salary_months": salary_months,
+            "employer": employer,
+            "job_tenure_years": job_tenure_years,
+            "age": age,
+            "dependents": dependents,
+            "residence": residence,
+            "bike_type": bike_type,
+            "bike_price": bike_price,
+            "outstanding": outstanding,
+            "address": address,
+            "area": area,
+            "city": city,
+            "license_number": license_number,
+        }
+        st.success("Applicant info saved. Move to Scoring page.")
+
+# -----------------------------
+# Scoring Page
+# -----------------------------
+elif page == "Scoring":
+    if not st.session_state.applicant_data:
+        st.warning("Please fill Applicant Info first.")
+    else:
+        st.subheader("Scoring Evaluation")
+        d = st.session_state.applicant_data
+
+        income = income_score(d["net_salary"], d["gender"])
+        bank = bank_balance_score(d["avg_balance"])
+        salary_cons = salary_consistency_score(d["salary_months"])
+        employer_s = employer_type_score(d["employer"])
+        tenure = job_tenure_score(d["job_tenure_years"])
+        age_s = age_score(d["age"])
+        dep_s = dependents_score(d["dependents"])
+        res_s = residence_score(d["residence"])
+        ratio = dti_ratio(d["outstanding"], d["bike_price"], d["net_salary"])
+        dti_s = dti_score(ratio)
+
         scores = {
-            "income": income_score(net_salary, st.session_state.applicant.get("gender")),
-            "bank_balance": bank_balance_score(bank_balance, installment_amount),
-            "salary_consistency": salary_consistency_score(months_consistent),
-            "employer_type": employer_type_score(employer_type),
-            "job_tenure": job_tenure_score(job_tenure_years),
-            "age": age_score(age),
-            "dependents": dependents_score(dependents),
-            "residence": residence_score(residence_type),
-            "dti": dti_score(dti_ratio(outstanding_loan, bike_price, net_salary)),
+            "income": income,
+            "bank_balance": bank,
+            "salary_consistency": salary_cons,
+            "employer_type": employer_s,
+            "job_tenure": tenure,
+            "age": age_s,
+            "dependents": dep_s,
+            "residence": res_s,
+            "dti": dti_s,
         }
 
-        final = weighted_final_score(scores)
-        final_dec = decision(final)
-        dti_val = dti_ratio(outstanding_loan, bike_price, net_salary)
-        reasons = generate_reasons(scores, dti_val, final_dec, st.session_state.applicant)
+        final = weighted_score(scores)
+        dec = decision(final)
 
-        st.session_state.result = {
-            "scores": scores,
-            "final_score": final,
-            "decision": final_dec,
-            "dti_value": dti_val,
-            "reasons": reasons,
-        }
-        st.session_state.page = "results"
-        st.experimental_rerun()
+        st.session_state.scores = scores
+        st.session_state.final_score = final
+        st.session_state.decision = dec
 
-# -------- Page 3: Results --------
-elif st.session_state.page == "results":
-    st.header("Step 3 — Results & Decision")
+        st.success("Scoring complete. Move to Results page.")
 
-    result = st.session_state.result
-    scores = result["scores"]
+# -----------------------------
+# Results Page
+# -----------------------------
+elif page == "Results":
+    if not st.session_state.scores:
+        st.warning("Please run scoring first.")
+    else:
+        st.subheader("Results")
 
-    st.subheader("Output Variables")
-    st.write(f"Income Score (with gender adj.): {scores['income']:.1f}")
-    st.write(f"Bank Balance Score: {scores['bank_balance']:.1f}")
-    st.write(f"Salary Consistency Score: {scores['salary_consistency']:.1f}")
-    st.write(f"Employer Type Score: {scores['employer_type']:.1f}")
-    st.write(f"Job Tenure Score: {scores['job_tenure']:.1f}")
-    st.write(f"Age Score: {scores['age']:.1f}")
-    st.write(f"Dependents Score: {scores['dependents']:.1f}")
-    st.write(f"Residence Score: {scores['residence']:.1f}")
-    st.write(f"Debt-to-Income Ratio: {result['dti_value']:.2f}")
-    st.write(f"Debt-to-Income Score: {scores['dti']:.1f}")
-    st.markdown("---")
-    st.write(f"Final Weighted Score: {result['final_score']:.1f}")
-    st.write(f"Decision: **{result['decision']}**")
+        for k, v in st.session_state.scores.items():
+            st.write(f"**{k.replace('_',' ').title()} Score:** {v:.1f}")
 
-    st.subheader("Decision Reasons")
-    for r in result["reasons"]:
-        st.write("•", r)
+        d = st.session_state.applicant_data
+        ratio = dti_ratio(d["outstanding"], d["bike_price"], d["net_salary"])
+        st.write(f"**Debt-to-Income Ratio:** {ratio:.2f}")
+        st.write(f"**Final Score:** {st.session_state.final_score:.1f}")
+        st.write(f"**Decision:** {st.session_state.decision}")
 
-    if st.button("New Applicant"):
-        st.session_state.page = "applicant"
-        st.session_state.applicant = {}
-        st.session_state.scoring = {}
-        st.session_state.result = {}
-        st.experimental_rerun()
+        st.markdown("### Decision Reasons")
+        for reason in decision_reasons(st.session_state.scores, st.session_state.decision):
+            st.write(f"- {reason}")
