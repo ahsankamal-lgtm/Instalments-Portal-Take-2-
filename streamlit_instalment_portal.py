@@ -51,7 +51,6 @@ def fetch_all_applicants():
 # Utility Functions
 # -----------------------------
 def validate_cnic(cnic: str) -> bool:
-    """Check CNIC format XXXXX-XXXXXXX-X"""
     return bool(re.fullmatch(r"\d{5}-\d{7}-\d", cnic))
 
 def income_score(net_salary, gender):
@@ -129,22 +128,173 @@ tabs = st.tabs(["📋 Applicant Information", "📊 Evaluation", "✅ Results", 
 # -----------------------------
 with tabs[0]:
     st.subheader("Applicant Information")
-    # ... (UNCHANGED CODE for Applicant Information) ...
 
+    first_name = st.text_input("First Name")
+    last_name = st.text_input("Last Name")
+
+    cnic = st.text_input("CNIC Number (Format: XXXXX-XXXXXXX-X)")
+    if cnic and not validate_cnic(cnic):
+        st.error("❌ Invalid CNIC format. Use XXXXX-XXXXXXX-X")
+
+    license_suffix = st.text_input("Enter last 3 digits for License Number (#XXX)")
+    license_number = f"{cnic}#{license_suffix}" if validate_cnic(cnic) and license_suffix else ""
+
+    guarantors = st.radio("Guarantors Available?", ["Yes", "No"])
+    female_guarantor = None
+    if guarantors == "Yes":
+        female_guarantor = st.radio("At least one Female Guarantor?", ["Yes", "No"])
+
+    address = st.text_input("Address")
+    area = st.text_input("Area")
+    city = st.text_input("City")
+
+    if st.button("📍 View Location"):
+        if address and area and city:
+            full_address = f"{address}, {area}, {city}"
+            encoded = urllib.parse.quote_plus(full_address)
+            maps_url = f"https://www.google.com/maps/search/?api=1&query={encoded}"
+
+            js = f"""
+            <script>
+            window.open("{maps_url}", "_blank").focus();
+            </script>
+            """
+            st.components.v1.html(js, height=0, width=0)
+        else:
+            st.error("❌ Please complete Address, Area, and City before viewing on Maps.")
+
+    gender = st.radio("Gender", ["M", "F"])
+
+    guarantor_valid = (guarantors == "Yes")
+    female_guarantor_valid = (female_guarantor == "Yes") if guarantors == "Yes" else True
+
+    if not guarantor_valid:
+        st.error("🚫 Application Rejected: No guarantor available.")
+    elif guarantors == "Yes" and not female_guarantor_valid:
+        st.error("🚫 Application Rejected: At least one female guarantor is required.")
+
+    info_complete = all([
+        first_name, last_name, validate_cnic(cnic), license_suffix,
+        guarantor_valid, female_guarantor_valid,
+        address, area, city, gender
+    ])
+
+    st.session_state.applicant_valid = info_complete
+
+    if info_complete:
+        st.success("✅ Applicant Information completed. Proceed to Evaluation tab.")
+    else:
+        st.warning("⚠️ Please complete all fields before proceeding.")
 
 # -----------------------------
 # Page 2: Evaluation
 # -----------------------------
 with tabs[1]:
-    # ... (UNCHANGED CODE for Evaluation) ...
+    if not st.session_state.get("applicant_valid", False):
+        st.error("🚫 Please complete Applicant Information first.")
+    else:
+        st.subheader("Evaluation Inputs")
 
+        net_salary = st.number_input("Net Salary", min_value=0, step=1000, format="%i")
+        emi = st.number_input("Monthly Installment (EMI)", min_value=0, step=500, format="%i")
+        bank_balance = st.number_input("Average 6M Bank Balance", min_value=0, step=1000, format="%i")
+        salary_consistency = st.number_input("Months with Salary Credit (0–12)", min_value=0, max_value=12, step=1)
+        employer_type = st.selectbox("Employer Type", ["Govt", "MNC", "SME", "Startup"])
+        job_years = st.number_input("Job Tenure (Years)", min_value=0, step=1, format="%i")
+        age = st.number_input("Age", min_value=18, max_value=70, step=1, format="%i")
+        dependents = st.number_input("Number of Dependents", min_value=0, step=1, format="%i")
+        residence = st.radio("Residence", ["Owned", "Rented"])
+        bike_type = st.selectbox("Bike Type", ["EV-1", "EV-125"])
+        bike_price = st.number_input("Bike Price", min_value=0, step=1000, format="%i")
+        outstanding = st.number_input("Outstanding Loan", min_value=0, step=1000, format="%i")
+
+        st.info("➡️ Once inputs are completed, check the Results tab for scoring and decision.")
 
 # -----------------------------
 # Page 3: Results
 # -----------------------------
 with tabs[2]:
-    # ... (UNCHANGED CODE for Results) ...
+    if not st.session_state.get("applicant_valid", False):
+        st.error("🚫 Please complete Applicant Information first.")
+    else:
+        st.subheader("📊 Results Summary")
 
+        if st.session_state.get("applicant_valid") and 'net_salary' in locals() and net_salary > 0 and 'emi' in locals() and emi > 0:
+            inc = income_score(net_salary, gender)
+            bal = bank_balance_score(bank_balance, emi)
+            sal = salary_consistency_score(salary_consistency)
+            emp = employer_type_score(employer_type)
+            job = job_tenure_score(job_years)
+            ag = age_score(age)
+            dep = dependents_score(dependents)
+            res = residence_score(residence)
+            dti, ratio = dti_score(outstanding, bike_price, net_salary)
+
+            final = (
+                inc * 0.40 + bal * 0.30 + sal * 0.04 + emp * 0.04 +
+                job * 0.04 + ag * 0.04 + dep * 0.04 + res * 0.05 + dti * 0.05
+            )
+
+            if final >= 75:
+                decision = "✅ Approve"
+            elif final >= 60:
+                decision = "🟡 Review"
+            else:
+                decision = "❌ Reject"
+
+            st.markdown("### 🔹 Detailed Scores")
+            st.write(f"**Income Score (with gender adj.):** {inc:.1f}")
+            st.write(f"**Bank Balance Score (vs. 3× EMI):** {bal:.1f}")
+            st.write(f"**Salary Consistency Score:** {sal:.1f}")
+            st.write(f"**Employer Type Score:** {emp:.1f}")
+            st.write(f"**Job Tenure Score:** {job:.1f}")
+            st.write(f"**Age Score:** {ag:.1f}")
+            st.write(f"**Dependents Score:** {dep:.1f}")
+            st.write(f"**Residence Score:** {res:.1f}")
+            st.write(f"**Debt-to-Income Ratio:** {ratio:.2f}")
+            st.write(f"**Debt-to-Income Score:** {dti:.1f}")
+            st.write(f"**Final Score:** {final:.1f}")
+            st.subheader(f"🏆 Decision: {decision}")
+
+            st.markdown("### 📌 Decision Reasons")
+            reasons = []
+            if inc < 60:
+                reasons.append("• Moderate to low income level.")
+            if bal >= 100:
+                reasons.append("• Bank balance fully meets requirement (≥ 3× EMI).")
+            else:
+                reasons.append("• Bank balance below recommended 3× EMI.")
+            if dti < 70:
+                reasons.append("• High debt-to-income ratio, risky.")
+            if final >= 75:
+                reasons.append("• Profile fits approval criteria.")
+            for r in reasons:
+                st.write(r)
+
+            if decision == "✅ Approve":
+                if st.button("💾 Save Applicant to Database"):
+                    try:
+                        save_to_db({
+                            "first_name": first_name,
+                            "last_name": last_name,
+                            "cnic": cnic,
+                            "license_no": license_number,
+                            "guarantors": guarantors,
+                            "female_guarantor": female_guarantor if female_guarantor else "No",
+                            "address": address,
+                            "area": area,
+                            "city": city,
+                            "gender": gender,
+                            "net_salary": net_salary,
+                            "emi": emi,
+                            "bike_type": bike_type,
+                            "bike_price": bike_price,
+                        })
+                        st.success("✅ Applicant information saved to database successfully!")
+                    except Exception as e:
+                        st.error(f"❌ Failed to save applicant: {e}")
+        else:
+            st.warning("⚠️ Complete Evaluation inputs first")
 
 # -----------------------------
 # Page 4: Applicants
