@@ -360,7 +360,7 @@ with tabs[2]:
             st.warning("⚠️ Complete Evaluation inputs first")
 
 # -----------------------------
-# Page 4: Applicants Database (ADDED)
+# Page 4: Applicants Database (ENHANCED WITH SOFT DELETE)
 # -----------------------------
 with tabs[3]:
     st.subheader("👥 Applicants Database")
@@ -368,19 +368,29 @@ with tabs[3]:
     # Refresh button
     refresh = st.button("🔄 Refresh Applicants")
 
-    # Fetch data
-    df = fetch_all_applicants()
+    # Show deleted toggle
+    show_deleted = st.checkbox("Show Deleted Applicants", value=False)
 
-    if df.empty:
-        st.info("No applicants found in the database.")
+    # Fetch data (active or deleted depending on toggle)
+    df = fetch_all_applicants()
+    if not df.empty and "is_deleted" in df.columns:
+        if show_deleted:
+            filtered_db = df[df["is_deleted"] == 1]
+        else:
+            filtered_db = df[df["is_deleted"] == 0]
     else:
-        # Basic filters
+        filtered_db = df.copy()
+
+    if filtered_db.empty:
+        st.info("No applicants found.")
+    else:
+        # Filters
         col1, col2, col3 = st.columns([2, 2, 2])
         search_cnic = col1.text_input("🔎 Search CNIC")
-        search_name = col2.text_input("🔎 Search name")
-        filter_city = col3.selectbox("🏙 Filter by city", ["All"] + sorted(df['city'].dropna().unique().tolist()))
+        search_name = col2.text_input("🔎 Search Name")
+        filter_city = col3.selectbox("🏙 Filter by City", ["All"] + sorted(df['city'].dropna().unique().tolist()))
 
-        filtered = df.copy()
+        filtered = filtered_db.copy()
         if search_cnic:
             filtered = filtered[filtered['cnic'].astype(str).str.contains(search_cnic, na=False)]
         if search_name:
@@ -402,44 +412,77 @@ with tabs[3]:
                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
         st.markdown("---")
-        st.subheader("🗑️ Delete Applicants (single / bulk)")
+        st.subheader("🗑️ Manage Applicants")
 
-        # Single delete (by ID) with confirmation checkbox
-        single_id = st.number_input("Enter Applicant ID to delete (single)", min_value=1, step=1, key="single_delete_id")
-        if st.button("Delete Single Applicant"):
-            if st.checkbox("Confirm deletion of selected applicant", key="confirm_single"):
-                success = delete_applicant_by_id(single_id)
-                if success:
-                    st.success(f"✅ Applicant with ID {single_id} deleted.")
+        # Single soft delete / restore
+        single_id = st.number_input("Enter Applicant ID", min_value=1, step=1, key="single_id_action")
+
+        if st.button("🗑️ Soft Delete Applicant"):
+            if not df[df["id"] == single_id].empty:
+                try:
+                    conn = get_db_connection()
+                    cur = conn.cursor()
+                    cur.execute("UPDATE data SET is_deleted = 1 WHERE id = %s", (int(single_id),))
+                    conn.commit()
+                    cur.close()
+                    conn.close()
+                    st.success(f"✅ Applicant {single_id} marked as deleted.")
                     st.experimental_rerun()
-                else:
-                    st.error("❌ Delete failed.")
+                except Exception as e:
+                    st.error(f"❌ Failed to soft delete: {e}")
             else:
-                st.warning("⚠️ Please confirm deletion by checking the box.")
+                st.warning("⚠️ Applicant ID not found.")
 
-        # Bulk delete with multiselect and confirmation
-        st.write("Select multiple applicants to delete:")
+        if st.button("♻️ Restore Applicant"):
+            if not df[df["id"] == single_id].empty:
+                try:
+                    conn = get_db_connection()
+                    cur = conn.cursor()
+                    cur.execute("UPDATE data SET is_deleted = 0 WHERE id = %s", (int(single_id),))
+                    conn.commit()
+                    cur.close()
+                    conn.close()
+                    st.success(f"✅ Applicant {single_id} restored successfully.")
+                    st.experimental_rerun()
+                except Exception as e:
+                    st.error(f"❌ Failed to restore: {e}")
+            else:
+                st.warning("⚠️ Applicant ID not found.")
+
+        # Bulk delete / restore
+        st.write("Select multiple applicants to manage:")
         id_list = filtered['id'].tolist()
-        selected_ids = st.multiselect("Select Applicant IDs", options=id_list, key="bulk_select_ids")
-        if selected_ids:
-            if st.button("Delete Selected Applicants"):
-                if st.checkbox("Confirm bulk deletion of selected applicants", key="confirm_bulk"):
-                    # convert to ints
-                    try:
-                        ids_to_delete = [int(x) for x in selected_ids]
-                        success = delete_multiple_applicants(ids_to_delete)
-                        if success:
-                            st.success(f"✅ Applicants {ids_to_delete} deleted.")
-                            st.experimental_rerun()
-                        else:
-                            st.error("❌ Bulk delete failed.")
-                    except Exception as e:
-                        st.error(f"❌ Bulk delete error: {e}")
-                else:
-                    st.warning("⚠️ Please confirm bulk deletion by checking the box.")
+        selected_ids = st.multiselect("Select Applicant IDs", options=id_list, key="bulk_ids")
 
-    # If refresh pressed just rerun
+        colA, colB = st.columns([1, 1])
+        if colA.button("🗑️ Bulk Soft Delete"):
+            try:
+                conn = get_db_connection()
+                cur = conn.cursor()
+                format_strings = ','.join(['%s'] * len(selected_ids))
+                cur.execute(f"UPDATE data SET is_deleted = 1 WHERE id IN ({format_strings})", tuple(selected_ids))
+                conn.commit()
+                cur.close()
+                conn.close()
+                st.success(f"✅ Applicants {selected_ids} marked as deleted.")
+                st.experimental_rerun()
+            except Exception as e:
+                st.error(f"❌ Bulk soft delete failed: {e}")
+
+        if colB.button("♻️ Bulk Restore"):
+            try:
+                conn = get_db_connection()
+                cur = conn.cursor()
+                format_strings = ','.join(['%s'] * len(selected_ids))
+                cur.execute(f"UPDATE data SET is_deleted = 0 WHERE id IN ({format_strings})", tuple(selected_ids))
+                conn.commit()
+                cur.close()
+                conn.close()
+                st.success(f"✅ Applicants {selected_ids} restored successfully.")
+                st.experimental_rerun()
+            except Exception as e:
+                st.error(f"❌ Bulk restore failed: {e}")
+
+    # Refresh
     if refresh:
         st.experimental_rerun()
-
-
