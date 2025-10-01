@@ -1,6 +1,42 @@
 import streamlit as st
 import re
 import urllib.parse
+import mysql.connector
+
+# -----------------------------
+# Database Connection
+# -----------------------------
+def get_db_connection():
+    return mysql.connector.connect(
+        host="3.17.21.91",
+        user="ahsan",
+        password="ahsan@321",
+        database="ev_installment_project"
+    )
+
+def save_to_db(data: dict):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    query = """
+    INSERT INTO data (
+        first_name, last_name, cnic, license_no,
+        guarantors, female_guarantor, address, area, city, gender,
+        net_salary, emi, bike_type, bike_price
+    )
+    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+    """
+
+    values = (
+        data["first_name"], data["last_name"], data["cnic"], data["license_no"],
+        data["guarantors"], data["female_guarantor"], data["address"], data["area"], data["city"], data["gender"],
+        data["net_salary"], data["emi"], data["bike_type"], data["bike_price"]
+    )
+
+    cursor.execute(query, values)
+    conn.commit()
+    cursor.close()
+    conn.close()
 
 # -----------------------------
 # Utility Functions
@@ -245,5 +281,29 @@ with tabs[2]:
 
             for r in reasons:
                 st.write(r)
+
+            # Save to DB only if approved
+            if decision == "✅ Approve":
+                if st.button("💾 Save Applicant to Database"):
+                    try:
+                        save_to_db({
+                            "first_name": first_name,
+                            "last_name": last_name,
+                            "cnic": cnic,
+                            "license_no": license_number,
+                            "guarantors": guarantors,
+                            "female_guarantor": female_guarantor if female_guarantor else "No",
+                            "address": address,
+                            "area": area,
+                            "city": city,
+                            "gender": gender,
+                            "net_salary": net_salary,
+                            "emi": emi,
+                            "bike_type": bike_type,
+                            "bike_price": bike_price,
+                        })
+                        st.success("✅ Applicant information saved to database successfully!")
+                    except Exception as e:
+                        st.error(f"❌ Failed to save applicant: {e}")
         else:
             st.warning("⚠️ Complete Evaluation inputs first")
