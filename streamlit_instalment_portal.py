@@ -121,7 +121,7 @@ def dti_score(outstanding, bike_price, net_salary):
 st.set_page_config(page_title="⚡ Electric Bike Finance Portal", layout="centered")
 st.title("⚡ Electric Bike Finance Portal")
 
-tabs = st.tabs(["📋 𝖠𝗉𝗉𝗅𝗂𝖼𝖺𝗇𝗍 𝖨𝗇𝖿𝗈𝗋𝗆𝖺𝗍𝗂𝗈𝗇", "📊 Evaluation", "✅ Results", "📂 Applicants"])
+tabs = st.tabs(["📋 Applicant Information", "📊 Evaluation", "✅ Results", "📂 Applicants"])
 
 # -----------------------------
 # Page 1: Applicant Info
