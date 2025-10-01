@@ -67,12 +67,12 @@ def residence_score(res):
 
 def dti_score(outstanding, bike_price, net_salary):
     if net_salary <= 0:
-        return 0
+        return 0, 0
     ratio = (outstanding + bike_price) / net_salary
     if ratio <= 0.5:
-        return 100
+        return 100, ratio
     elif ratio <= 1:
-        return 70
+        return 70, ratio
     else:
         return 40, ratio
 
@@ -132,96 +132,104 @@ with tabs[0]:
         guarantors, (female_guarantor if guarantors == "Yes" else True),
         address, area, city, gender
     ])
+
+    st.session_state.applicant_valid = info_complete
+
     if info_complete:
         st.success("✅ Applicant Information completed. Proceed to Evaluation tab.")
     else:
-        st.warning("⚠️ Please complete all fields.")
+        st.warning("⚠️ Please complete all fields before proceeding.")
 
 
 # -----------------------------
 # Page 2: Evaluation
 # -----------------------------
 with tabs[1]:
-    st.subheader("Evaluation Inputs")
+    if not st.session_state.get("applicant_valid", False):
+        st.error("🚫 Please complete Applicant Information first.")
+    else:
+        st.subheader("Evaluation Inputs")
 
-    net_salary = st.number_input("Net Salary", min_value=0, step=1000, format="%i")
-    bank_balance = st.number_input("Average 6M Bank Balance", min_value=0, step=1000, format="%i")
-    salary_consistency = st.number_input("Months with Salary Credit (0–12)", min_value=0, max_value=12, step=1)
-    employer_type = st.selectbox("Employer Type", ["Govt", "MNC", "SME", "Startup"])
-    job_years = st.number_input("Job Tenure (Years)", min_value=0, step=1, format="%i")
-    age = st.number_input("Age", min_value=18, max_value=70, step=1, format="%i")
-    dependents = st.number_input("Number of Dependents", min_value=0, step=1, format="%i")
-    residence = st.radio("Residence", ["Owned", "Rented"])
-    bike_type = st.selectbox("Bike Type", ["EV-1", "EV-125"])
-    bike_price = st.number_input("Bike Price", min_value=0, step=1000, format="%i")
-    outstanding = st.number_input("Outstanding Loan", min_value=0, step=1000, format="%i")
+        net_salary = st.number_input("Net Salary", min_value=0, step=1000, format="%i")
+        bank_balance = st.number_input("Average 6M Bank Balance", min_value=0, step=1000, format="%i")
+        salary_consistency = st.number_input("Months with Salary Credit (0–12)", min_value=0, max_value=12, step=1)
+        employer_type = st.selectbox("Employer Type", ["Govt", "MNC", "SME", "Startup"])
+        job_years = st.number_input("Job Tenure (Years)", min_value=0, step=1, format="%i")
+        age = st.number_input("Age", min_value=18, max_value=70, step=1, format="%i")
+        dependents = st.number_input("Number of Dependents", min_value=0, step=1, format="%i")
+        residence = st.radio("Residence", ["Owned", "Rented"])
+        bike_type = st.selectbox("Bike Type", ["EV-1", "EV-125"])
+        bike_price = st.number_input("Bike Price", min_value=0, step=1000, format="%i")
+        outstanding = st.number_input("Outstanding Loan", min_value=0, step=1000, format="%i")
 
-    st.info("➡️ Once inputs are completed, check the Results tab for scoring and decision.")
+        st.info("➡️ Once inputs are completed, check the Results tab for scoring and decision.")
 
 
 # -----------------------------
 # Page 3: Results
 # -----------------------------
 with tabs[2]:
-    st.subheader("📊 Results Summary")
-
-    if info_complete and net_salary > 0:
-        inc = income_score(net_salary, gender)
-        bal = bank_balance_score(bank_balance)
-        sal = salary_consistency_score(salary_consistency)
-        emp = employer_type_score(employer_type)
-        job = job_tenure_score(job_years)
-        ag = age_score(age)
-        dep = dependents_score(dependents)
-        res = residence_score(residence)
-
-        dti, ratio = dti_score(outstanding, bike_price, net_salary)
-        if isinstance(dti, tuple):  # fix for return
-            dti, ratio = dti
-
-        # Weighted final score
-        final = (
-            inc * 0.40 + bal * 0.30 + sal * 0.04 + emp * 0.04 +
-            job * 0.04 + ag * 0.04 + dep * 0.04 + res * 0.05 + dti * 0.05
-        )
-
-        # Decision
-        if final >= 75:
-            decision = "✅ Approve"
-        elif final >= 60:
-            decision = "🟡 Review"
-        else:
-            decision = "❌ Reject"
-
-        st.markdown("### 🔹 Detailed Scores")
-        st.write(f"**Income Score (with gender adj.):** {inc:.1f}")
-        st.write(f"**Bank Balance Score:** {bal:.1f}")
-        st.write(f"**Salary Consistency Score:** {sal:.1f}")
-        st.write(f"**Employer Type Score:** {emp:.1f}")
-        st.write(f"**Job Tenure Score:** {job:.1f}")
-        st.write(f"**Age Score:** {ag:.1f}")
-        st.write(f"**Dependents Score:** {dep:.1f}")
-        st.write(f"**Residence Score:** {res:.1f}")
-        st.write(f"**Debt-to-Income Ratio:** {ratio:.2f}")
-        st.write(f"**Debt-to-Income Score:** {dti:.1f}")
-        st.write(f"**Final Score:** {final:.1f}")
-        st.subheader(f"🏆 Decision: {decision}")
-
-        # Reasons
-        st.markdown("### 📌 Decision Reasons")
-        reasons = []
-        if inc < 60:
-            reasons.append("• Moderate to low income level.")
-        if bal >= 100:
-            reasons.append("• Bank balance fully meets requirement.")
-        else:
-            reasons.append("• Bank balance below recommended 3× EMI.")
-        if dti < 70:
-            reasons.append("• High debt-to-income ratio, risky.")
-        if final >= 75:
-            reasons.append("• Profile fits approval criteria.")
-
-        for r in reasons:
-            st.write(r)
+    if not st.session_state.get("applicant_valid", False):
+        st.error("🚫 Please complete Applicant Information first.")
     else:
-        st.warning("⚠️ Complete Applicant Information and Evaluation inputs first.")
+        st.subheader("📊 Results Summary")
+
+        if st.session_state.get("applicant_valid") and 'net_salary' in locals() and net_salary > 0:
+            inc = income_score(net_salary, gender)
+            bal = bank_balance_score(bank_balance)
+            sal = salary_consistency_score(salary_consistency)
+            emp = employer_type_score(employer_type)
+            job = job_tenure_score(job_years)
+            ag = age_score(age)
+            dep = dependents_score(dependents)
+            res = residence_score(residence)
+
+            dti, ratio = dti_score(outstanding, bike_price, net_salary)
+
+            # Weighted final score
+            final = (
+                inc * 0.40 + bal * 0.30 + sal * 0.04 + emp * 0.04 +
+                job * 0.04 + ag * 0.04 + dep * 0.04 + res * 0.05 + dti * 0.05
+            )
+
+            # Decision
+            if final >= 75:
+                decision = "✅ Approve"
+            elif final >= 60:
+                decision = "🟡 Review"
+            else:
+                decision = "❌ Reject"
+
+            st.markdown("### 🔹 Detailed Scores")
+            st.write(f"**Income Score (with gender adj.):** {inc:.1f}")
+            st.write(f"**Bank Balance Score:** {bal:.1f}")
+            st.write(f"**Salary Consistency Score:** {sal:.1f}")
+            st.write(f"**Employer Type Score:** {emp:.1f}")
+            st.write(f"**Job Tenure Score:** {job:.1f}")
+            st.write(f"**Age Score:** {ag:.1f}")
+            st.write(f"**Dependents Score:** {dep:.1f}")
+            st.write(f"**Residence Score:** {res:.1f}")
+            st.write(f"**Debt-to-Income Ratio:** {ratio:.2f}")
+            st.write(f"**Debt-to-Income Score:** {dti:.1f}")
+            st.write(f"**Final Score:** {final:.1f}")
+            st.subheader(f"🏆 Decision: {decision}")
+
+            # Reasons
+            st.markdown("### 📌 Decision Reasons")
+            reasons = []
+            if inc < 60:
+                reasons.append("• Moderate to low income level.")
+            if bal >= 100:
+                reasons.append("• Bank balance fully meets requirement.")
+            else:
+                reasons.append("• Bank balance below recommended 3× EMI.")
+            if dti < 70:
+                reasons.append("• High debt-to-income ratio, risky.")
+            if final >= 75:
+                reasons.append("• Profile fits approval criteria.")
+
+            for r in reasons:
+                st.write(r)
+        else:
+            st.warning("⚠️ Complete Evaluation inputs first.")
+
