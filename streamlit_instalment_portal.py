@@ -26,8 +26,13 @@ def income_score(net_salary, gender):
     return min(base, 100)
 
 
-def bank_balance_score(balance):
-    return min((balance / 30000) * 100, 100)
+def bank_balance_score(balance, emi):
+    """Score bank balance: 100 if ≥ 3 × EMI, proportional otherwise"""
+    if emi <= 0:
+        return 0
+    threshold = emi * 3
+    score = (balance / threshold) * 100
+    return min(score, 100)
 
 
 def salary_consistency_score(months):
@@ -151,6 +156,7 @@ with tabs[1]:
         st.subheader("Evaluation Inputs")
 
         net_salary = st.number_input("Net Salary", min_value=0, step=1000, format="%i")
+        emi = st.number_input("Monthly Installment (EMI)", min_value=0, step=500, format="%i")
         bank_balance = st.number_input("Average 6M Bank Balance", min_value=0, step=1000, format="%i")
         salary_consistency = st.number_input("Months with Salary Credit (0–12)", min_value=0, max_value=12, step=1)
         employer_type = st.selectbox("Employer Type", ["Govt", "MNC", "SME", "Startup"])
@@ -174,9 +180,9 @@ with tabs[2]:
     else:
         st.subheader("📊 Results Summary")
 
-        if st.session_state.get("applicant_valid") and 'net_salary' in locals() and net_salary > 0:
+        if st.session_state.get("applicant_valid") and 'net_salary' in locals() and net_salary > 0 and 'emi' in locals() and emi > 0:
             inc = income_score(net_salary, gender)
-            bal = bank_balance_score(bank_balance)
+            bal = bank_balance_score(bank_balance, emi)
             sal = salary_consistency_score(salary_consistency)
             emp = employer_type_score(employer_type)
             job = job_tenure_score(job_years)
@@ -202,7 +208,7 @@ with tabs[2]:
 
             st.markdown("### 🔹 Detailed Scores")
             st.write(f"**Income Score (with gender adj.):** {inc:.1f}")
-            st.write(f"**Bank Balance Score:** {bal:.1f}")
+            st.write(f"**Bank Balance Score (vs. 3× EMI):** {bal:.1f}")
             st.write(f"**Salary Consistency Score:** {sal:.1f}")
             st.write(f"**Employer Type Score:** {emp:.1f}")
             st.write(f"**Job Tenure Score:** {job:.1f}")
@@ -220,7 +226,7 @@ with tabs[2]:
             if inc < 60:
                 reasons.append("• Moderate to low income level.")
             if bal >= 100:
-                reasons.append("• Bank balance fully meets requirement.")
+                reasons.append("• Bank balance fully meets requirement (≥ 3× EMI).")
             else:
                 reasons.append("• Bank balance below recommended 3× EMI.")
             if dti < 70:
@@ -231,5 +237,4 @@ with tabs[2]:
             for r in reasons:
                 st.write(r)
         else:
-            st.warning("⚠️ Complete Evaluation inputs first.")
-
+            st.warning("⚠️ Complete Evaluation inputs first (including EMI).")
