@@ -96,7 +96,7 @@ def df_to_excel_bytes(df: pd.DataFrame):
     # Use xlsxwriter (or openpyxl) as engine — xlsxwriter recommended for speed
     with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
         df.to_excel(writer, index=False, sheet_name="Applicants")
-        writer.save()
+        # writer.save() <-- removed (handled automatically by context manager)
     processed_data = output.getvalue()
     return processed_data
 
@@ -441,4 +441,5 @@ with tabs[3]:
     # If refresh pressed just rerun
     if refresh:
         st.experimental_rerun()
+
 
