@@ -41,16 +41,31 @@ def save_to_db(data: dict):
 
 def fetch_all_applicants():
     conn = get_db_connection()
-    query = "SELECT * FROM data"
-    df = pd.read_sql(query, conn)
+    df = pd.read_sql("SELECT * FROM data", conn)
     conn.close()
     return df
+
+def delete_applicant_by_id(applicant_id):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM data WHERE id = %s", (applicant_id,))
+    conn.commit()
+    cursor.close()
+    conn.close()
+
+def delete_multiple_applicants(ids):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    format_strings = ','.join(['%s'] * len(ids))
+    cursor.execute(f"DELETE FROM data WHERE id IN ({format_strings})", tuple(ids))
+    conn.commit()
+    cursor.close()
+    conn.close()
 
 # -----------------------------
 # Utility Functions
 # -----------------------------
 def validate_cnic(cnic: str) -> bool:
-    """Check CNIC format XXXXX-XXXXXXX-X"""
     return bool(re.fullmatch(r"\d{5}-\d{7}-\d", cnic))
 
 def income_score(net_salary, gender):
@@ -121,7 +136,7 @@ def dti_score(outstanding, bike_price, net_salary):
 st.set_page_config(page_title="⚡ Electric Bike Finance Portal", layout="centered")
 st.title("⚡ Electric Bike Finance Portal")
 
-tabs = st.tabs(["📋 Applicant Information", "📊 Evaluation", "✅ Results", "📂 Applicants"])
+tabs = st.tabs(["📋 Applicant Information", "📊 Evaluation", "✅ Results", "👥 Applicants Database"])
 
 # -----------------------------
 # Page 1: Applicant Info
@@ -228,6 +243,7 @@ with tabs[2]:
             ag = age_score(age)
             dep = dependents_score(dependents)
             res = residence_score(residence)
+
             dti, ratio = dti_score(outstanding, bike_price, net_salary)
 
             final = (
@@ -268,6 +284,7 @@ with tabs[2]:
                 reasons.append("• High debt-to-income ratio, risky.")
             if final >= 75:
                 reasons.append("• Profile fits approval criteria.")
+
             for r in reasons:
                 st.write(r)
 
@@ -297,32 +314,48 @@ with tabs[2]:
             st.warning("⚠️ Complete Evaluation inputs first")
 
 # -----------------------------
-# Page 4: Applicants
+# Page 4: Applicants Database
 # -----------------------------
 with tabs[3]:
-    st.subheader("📂 Applicants Database")
-
-    if st.button("🔄 Refresh Data"):
-        st.session_state.refresh = True
+    st.subheader("👥 Applicants Database")
 
     try:
         df = fetch_all_applicants()
-        if not df.empty:
-            # Search and filter options
-            search_cnic = st.text_input("🔎 Search by CNIC")
-            filter_city = st.selectbox("🏙️ Filter by City", ["All"] + sorted(df["city"].unique().tolist()))
-            filter_gender = st.selectbox("⚧ Filter by Gender", ["All"] + sorted(df["gender"].unique().tolist()))
-
-            # Apply filters
-            if search_cnic:
-                df = df[df["cnic"].str.contains(search_cnic, case=False, na=False)]
-            if filter_city != "All":
-                df = df[df["city"] == filter_city]
-            if filter_gender != "All":
-                df = df[df["gender"] == filter_gender]
-
-            st.dataframe(df, use_container_width=True, hide_index=True)
+        if df.empty:
+            st.info("No applicants found in the database.")
         else:
-            st.info("ℹ️ No applicants found in the database yet.")
+            st.dataframe(df)
+
+            # Download options
+            csv = df.to_csv(index=False).encode("utf-8")
+            st.download_button("📥 Download CSV", data=csv, file_name="applicants.csv", mime="text/csv")
+
+            excel = df.to_excel(index=False, engine="openpyxl")
+            st.download_button("📥 Download Excel", data=excel, file_name="applicants.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+            # Delete single row
+            st.markdown("### 🗑️ Delete Applicant")
+            delete_id = st.number_input("Enter Applicant ID to delete", min_value=0, step=1, format="%i")
+            if delete_id:
+                if st.button("Delete Applicant"):
+                    if st.confirm("Are you sure you want to delete this applicant? This action cannot be undone."):
+                        try:
+                            delete_applicant_by_id(delete_id)
+                            st.success(f"✅ Applicant with ID {delete_id} deleted.")
+                        except Exception as e:
+                            st.error(f"❌ Failed to delete applicant: {e}")
+
+            # Bulk delete
+            st.markdown("### 🗑️ Bulk Delete")
+            selected_ids = st.multiselect("Select Applicant IDs to delete", df["id"].tolist())
+            if selected_ids:
+                if st.button("Delete Selected Applicants"):
+                    if st.confirm(f"Are you sure you want to delete applicants with IDs {selected_ids}? This action cannot be undone."):
+                        try:
+                            delete_multiple_applicants(selected_ids)
+                            st.success(f"✅ Applicants with IDs {selected_ids} deleted.")
+                        except Exception as e:
+                            st.error(f"❌ Failed to delete applicants: {e}")
+
     except Exception as e:
-        st.error(f"❌ Failed to load applicants: {e}")
+        st.error(f"❌ Failed to fetch applicants: {e}")
