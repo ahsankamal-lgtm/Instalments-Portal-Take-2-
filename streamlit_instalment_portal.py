@@ -1,361 +1,138 @@
 import streamlit as st
-import re
-import urllib.parse
-import mysql.connector
 import pandas as pd
+import mysql.connector
+from mysql.connector import Error
+import io
 
-# -----------------------------
-# Database Connection
-# -----------------------------
-def get_db_connection():
-    return mysql.connector.connect(
-        host="3.17.21.91",
-        user="ahsan",
-        password="ahsan@321",
-        database="ev_installment_project"
-    )
-
-def save_to_db(data: dict):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-
-    query = """
-    INSERT INTO data (
-        first_name, last_name, cnic, license_no,
-        guarantors, female_guarantor, address, area, city, gender,
-        net_salary, emi, bike_type, bike_price
-    )
-    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-    """
-
-    values = (
-        data["first_name"], data["last_name"], data["cnic"], data["license_no"],
-        data["guarantors"], data["female_guarantor"], data["address"], data["area"], data["city"], data["gender"],
-        data["net_salary"], data["emi"], data["bike_type"], data["bike_price"]
-    )
-
-    cursor.execute(query, values)
-    conn.commit()
-    cursor.close()
-    conn.close()
-
-def fetch_all_applicants():
-    conn = get_db_connection()
-    df = pd.read_sql("SELECT * FROM data", conn)
-    conn.close()
-    return df
-
-def delete_applicant_by_id(applicant_id):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("DELETE FROM data WHERE id = %s", (applicant_id,))
-    conn.commit()
-    cursor.close()
-    conn.close()
-
-def delete_multiple_applicants(ids):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    format_strings = ','.join(['%s'] * len(ids))
-    cursor.execute(f"DELETE FROM data WHERE id IN ({format_strings})", tuple(ids))
-    conn.commit()
-    cursor.close()
-    conn.close()
-
-# -----------------------------
-# Utility Functions
-# -----------------------------
-def validate_cnic(cnic: str) -> bool:
-    return bool(re.fullmatch(r"\d{5}-\d{7}-\d", cnic))
-
-def income_score(net_salary, gender):
-    if net_salary < 50000:
-        base = 0
-    elif 50000 <= net_salary < 70000:
-        base = 40
-    elif 70000 <= net_salary < 90000:
-        base = 60
-    elif 90000 <= net_salary < 110000:
-        base = 80
-    else:
-        base = 100
-    if gender == "F":
-        base *= 1.1
-    return min(base, 100)
-
-def bank_balance_score(balance, emi):
-    if emi <= 0:
-        return 0
-    threshold = emi * 3
-    score = (balance / threshold) * 100
-    return min(score, 100)
-
-def salary_consistency_score(months):
-    return min((months / 12) * 100, 100)
-
-def employer_type_score(emp_type):
-    mapping = {"Govt": 100, "MNC": 80, "SME": 60, "Startup": 40}
-    return mapping.get(emp_type, 0)
-
-def job_tenure_score(years):
-    if years >= 3:
-        return 100
-    elif 1 <= years < 3:
-        return 70
-    else:
-        return 40
-
-def age_score(age):
-    return 100 if 25 <= age <= 55 else 60
-
-def dependents_score(dep):
-    if dep <= 1:
-        return 100
-    elif dep == 2:
-        return 70
-    else:
-        return 40
-
-def residence_score(res):
-    return 100 if res == "Owned" else 60
-
-def dti_score(outstanding, bike_price, net_salary):
-    if net_salary <= 0:
-        return 0, 0
-    ratio = (outstanding + bike_price) / net_salary
-    if ratio <= 0.5:
-        return 100, ratio
-    elif ratio <= 1:
-        return 70, ratio
-    else:
-        return 40, ratio
-
-# -----------------------------
-# Streamlit App
-# -----------------------------
-st.set_page_config(page_title="⚡ Electric Bike Finance Portal", layout="centered")
-st.title("⚡ Electric Bike Finance Portal")
-
-tabs = st.tabs(["📋 Applicant Information", "📊 Evaluation", "✅ Results", "👥 Applicants Database"])
-
-# -----------------------------
-# Page 1: Applicant Info
-# -----------------------------
-with tabs[0]:
-    st.subheader("Applicant Information")
-
-    first_name = st.text_input("First Name")
-    last_name = st.text_input("Last Name")
-
-    cnic = st.text_input("CNIC Number (Format: XXXXX-XXXXXXX-X)")
-    if cnic and not validate_cnic(cnic):
-        st.error("❌ Invalid CNIC format. Use XXXXX-XXXXXXX-X")
-
-    license_suffix = st.text_input("Enter last 3 digits for License Number (#XXX)")
-    license_number = f"{cnic}#{license_suffix}" if validate_cnic(cnic) and license_suffix else ""
-
-    guarantors = st.radio("Guarantors Available?", ["Yes", "No"])
-    female_guarantor = None
-    if guarantors == "Yes":
-        female_guarantor = st.radio("At least one Female Guarantor?", ["Yes", "No"])
-
-    address = st.text_input("Address")
-    area = st.text_input("Area")
-    city = st.text_input("City")
-
-    if st.button("📍 View Location"):
-        if address and area and city:
-            full_address = f"{address}, {area}, {city}"
-            encoded = urllib.parse.quote_plus(full_address)
-            maps_url = f"https://www.google.com/maps/search/?api=1&query={encoded}"
-
-            js = f"""
-            <script>
-            window.open("{maps_url}", "_blank").focus();
-            </script>
-            """
-            st.components.v1.html(js, height=0, width=0)
-        else:
-            st.error("❌ Please complete Address, Area, and City before viewing on Maps.")
-
-    gender = st.radio("Gender", ["M", "F"])
-
-    guarantor_valid = (guarantors == "Yes")
-    female_guarantor_valid = (female_guarantor == "Yes") if guarantors == "Yes" else True
-
-    if not guarantor_valid:
-        st.error("🚫 Application Rejected: No guarantor available.")
-    elif guarantors == "Yes" and not female_guarantor_valid:
-        st.error("🚫 Application Rejected: At least one female guarantor is required.")
-
-    info_complete = all([
-        first_name, last_name, validate_cnic(cnic), license_suffix,
-        guarantor_valid, female_guarantor_valid,
-        address, area, city, gender
-    ])
-
-    st.session_state.applicant_valid = info_complete
-
-    if info_complete:
-        st.success("✅ Applicant Information completed. Proceed to Evaluation tab.")
-    else:
-        st.warning("⚠️ Please complete all fields before proceeding.")
-
-# -----------------------------
-# Page 2: Evaluation
-# -----------------------------
-with tabs[1]:
-    if not st.session_state.get("applicant_valid", False):
-        st.error("🚫 Please complete Applicant Information first.")
-    else:
-        st.subheader("Evaluation Inputs")
-
-        net_salary = st.number_input("Net Salary", min_value=0, step=1000, format="%i")
-        emi = st.number_input("Monthly Installment (EMI)", min_value=0, step=500, format="%i")
-        bank_balance = st.number_input("Average 6M Bank Balance", min_value=0, step=1000, format="%i")
-        salary_consistency = st.number_input("Months with Salary Credit (0–12)", min_value=0, max_value=12, step=1)
-        employer_type = st.selectbox("Employer Type", ["Govt", "MNC", "SME", "Startup"])
-        job_years = st.number_input("Job Tenure (Years)", min_value=0, step=1, format="%i")
-        age = st.number_input("Age", min_value=18, max_value=70, step=1, format="%i")
-        dependents = st.number_input("Number of Dependents", min_value=0, step=1, format="%i")
-        residence = st.radio("Residence", ["Owned", "Rented"])
-        bike_type = st.selectbox("Bike Type", ["EV-1", "EV-125"])
-        bike_price = st.number_input("Bike Price", min_value=0, step=1000, format="%i")
-        outstanding = st.number_input("Outstanding Loan", min_value=0, step=1000, format="%i")
-
-        st.info("➡️ Once inputs are completed, check the Results tab for scoring and decision.")
-
-# -----------------------------
-# Page 3: Results
-# -----------------------------
-with tabs[2]:
-    if not st.session_state.get("applicant_valid", False):
-        st.error("🚫 Please complete Applicant Information first.")
-    else:
-        st.subheader("📊 Results Summary")
-
-        if st.session_state.get("applicant_valid") and 'net_salary' in locals() and net_salary > 0 and 'emi' in locals() and emi > 0:
-            inc = income_score(net_salary, gender)
-            bal = bank_balance_score(bank_balance, emi)
-            sal = salary_consistency_score(salary_consistency)
-            emp = employer_type_score(employer_type)
-            job = job_tenure_score(job_years)
-            ag = age_score(age)
-            dep = dependents_score(dependents)
-            res = residence_score(residence)
-
-            dti, ratio = dti_score(outstanding, bike_price, net_salary)
-
-            final = (
-                inc * 0.40 + bal * 0.30 + sal * 0.04 + emp * 0.04 +
-                job * 0.04 + ag * 0.04 + dep * 0.04 + res * 0.05 + dti * 0.05
-            )
-
-            if final >= 75:
-                decision = "✅ Approve"
-            elif final >= 60:
-                decision = "🟡 Review"
-            else:
-                decision = "❌ Reject"
-
-            st.markdown("### 🔹 Detailed Scores")
-            st.write(f"**Income Score (with gender adj.):** {inc:.1f}")
-            st.write(f"**Bank Balance Score (vs. 3× EMI):** {bal:.1f}")
-            st.write(f"**Salary Consistency Score:** {sal:.1f}")
-            st.write(f"**Employer Type Score:** {emp:.1f}")
-            st.write(f"**Job Tenure Score:** {job:.1f}")
-            st.write(f"**Age Score:** {ag:.1f}")
-            st.write(f"**Dependents Score:** {dep:.1f}")
-            st.write(f"**Residence Score:** {res:.1f}")
-            st.write(f"**Debt-to-Income Ratio:** {ratio:.2f}")
-            st.write(f"**Debt-to-Income Score:** {dti:.1f}")
-            st.write(f"**Final Score:** {final:.1f}")
-            st.subheader(f"🏆 Decision: {decision}")
-
-            st.markdown("### 📌 Decision Reasons")
-            reasons = []
-            if inc < 60:
-                reasons.append("• Moderate to low income level.")
-            if bal >= 100:
-                reasons.append("• Bank balance fully meets requirement (≥ 3× EMI).")
-            else:
-                reasons.append("• Bank balance below recommended 3× EMI.")
-            if dti < 70:
-                reasons.append("• High debt-to-income ratio, risky.")
-            if final >= 75:
-                reasons.append("• Profile fits approval criteria.")
-
-            for r in reasons:
-                st.write(r)
-
-            if decision == "✅ Approve":
-                if st.button("💾 Save Applicant to Database"):
-                    try:
-                        save_to_db({
-                            "first_name": first_name,
-                            "last_name": last_name,
-                            "cnic": cnic,
-                            "license_no": license_number,
-                            "guarantors": guarantors,
-                            "female_guarantor": female_guarantor if female_guarantor else "No",
-                            "address": address,
-                            "area": area,
-                            "city": city,
-                            "gender": gender,
-                            "net_salary": net_salary,
-                            "emi": emi,
-                            "bike_type": bike_type,
-                            "bike_price": bike_price,
-                        })
-                        st.success("✅ Applicant information saved to database successfully!")
-                    except Exception as e:
-                        st.error(f"❌ Failed to save applicant: {e}")
-        else:
-            st.warning("⚠️ Complete Evaluation inputs first")
-
-# -----------------------------
-# Page 4: Applicants Database
-# -----------------------------
-with tabs[3]:
-    st.subheader("👥 Applicants Database")
-
+# ---------------- DATABASE CONNECTION ----------------
+def create_connection():
     try:
-        df = fetch_all_applicants()
-        if df.empty:
-            st.info("No applicants found in the database.")
-        else:
-            st.dataframe(df)
+        connection = mysql.connector.connect(
+            host="3.17.21.91",
+            database="ev_installment_project",
+            user="ahsan",
+            password="ahsan@321"
+        )
+        return connection
+    except Error as e:
+        st.error(f"❌ Database connection failed: {e}")
+        return None
 
-            # Download options
-            csv = df.to_csv(index=False).encode("utf-8")
-            st.download_button("📥 Download CSV", data=csv, file_name="applicants.csv", mime="text/csv")
+# ---------------- FETCH APPLICANTS ----------------
+def fetch_applicants():
+    connection = create_connection()
+    if connection:
+        try:
+            query = "SELECT * FROM data"
+            df = pd.read_sql(query, connection)
+            connection.close()
+            return df
+        except Error as e:
+            st.error(f"❌ Failed to fetch applicants: {e}")
+            return pd.DataFrame()
+    return pd.DataFrame()
 
-            excel = df.to_excel(index=False, engine="openpyxl")
-            st.download_button("📥 Download Excel", data=excel, file_name="applicants.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+# ---------------- DELETE FUNCTIONS ----------------
+def delete_applicant(applicant_id):
+    connection = create_connection()
+    if connection:
+        try:
+            cursor = connection.cursor()
+            cursor.execute("DELETE FROM data WHERE id = %s", (applicant_id,))
+            connection.commit()
+            connection.close()
+            return True
+        except Error as e:
+            st.error(f"❌ Failed to delete applicant: {e}")
+            return False
+    return False
 
-            # Delete single row
-            st.markdown("### 🗑️ Delete Applicant")
-            delete_id = st.number_input("Enter Applicant ID to delete", min_value=0, step=1, format="%i")
-            if delete_id:
-                if st.button("Delete Applicant"):
-                    if st.confirm("Are you sure you want to delete this applicant? This action cannot be undone."):
-                        try:
-                            delete_applicant_by_id(delete_id)
-                            st.success(f"✅ Applicant with ID {delete_id} deleted.")
-                        except Exception as e:
-                            st.error(f"❌ Failed to delete applicant: {e}")
+def bulk_delete(applicant_ids):
+    connection = create_connection()
+    if connection:
+        try:
+            cursor = connection.cursor()
+            format_strings = ','.join(['%s'] * len(applicant_ids))
+            cursor.execute(f"DELETE FROM data WHERE id IN ({format_strings})", tuple(applicant_ids))
+            connection.commit()
+            connection.close()
+            return True
+        except Error as e:
+            st.error(f"❌ Failed bulk delete: {e}")
+            return False
+    return False
 
-            # Bulk delete
-            st.markdown("### 🗑️ Bulk Delete")
-            selected_ids = st.multiselect("Select Applicant IDs to delete", df["id"].tolist())
-            if selected_ids:
-                if st.button("Delete Selected Applicants"):
-                    if st.confirm(f"Are you sure you want to delete applicants with IDs {selected_ids}? This action cannot be undone."):
-                        try:
-                            delete_multiple_applicants(selected_ids)
-                            st.success(f"✅ Applicants with IDs {selected_ids} deleted.")
-                        except Exception as e:
-                            st.error(f"❌ Failed to delete applicants: {e}")
+# ---------------- DOWNLOAD HELPERS ----------------
+def convert_df_to_csv(df):
+    return df.to_csv(index=False).encode("utf-8")
 
-    except Exception as e:
-        st.error(f"❌ Failed to fetch applicants: {e}")
+def convert_df_to_excel(df):
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
+        df.to_excel(writer, index=False, sheet_name="Applicants")
+    processed_data = output.getvalue()
+    return processed_data
+
+# ---------------- STREAMLIT APP ----------------
+st.set_page_config(page_title="Electric Bike Finance Portal", layout="wide")
+
+tabs = ["Applicant Information", "Evaluation", "Results", "Applicants"]
+current_tab = st.sidebar.radio("Navigation", tabs)
+
+if current_tab == "Applicants":
+    st.header("📋 Applicants Database")
+
+    # Button to reload applicants after changes
+    if st.button("🔄 Refresh Applicants"):
+        st.experimental_rerun()
+
+    df = fetch_applicants()
+
+    if df.empty:
+        st.info("No applicants found in the database.")
+    else:
+        # Show applicants table with index
+        st.dataframe(df)
+
+        # Download options
+        csv = convert_df_to_csv(df)
+        st.download_button(
+            "⬇️ Download CSV",
+            data=csv,
+            file_name="applicants.csv",
+            mime="text/csv",
+        )
+
+        excel = convert_df_to_excel(df)
+        st.download_button(
+            "⬇️ Download Excel",
+            data=excel,
+            file_name="applicants.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+
+        st.subheader("🗑 Manage Applicants")
+
+        # Individual delete
+        selected_id = st.number_input("Enter Applicant ID to delete", min_value=1, step=1)
+        if st.button("Delete Selected Applicant"):
+            if st.checkbox("Confirm deletion of selected applicant"):
+                if delete_applicant(selected_id):
+                    st.success(f"✅ Applicant ID {selected_id} deleted successfully.")
+                    st.experimental_rerun()
+            else:
+                st.warning("⚠️ Please confirm deletion by ticking the checkbox.")
+
+        # Bulk delete
+        bulk_ids = st.text_input("Enter Applicant IDs to delete (comma separated)")
+        if st.button("Bulk Delete"):
+            if st.checkbox("Confirm bulk deletion"):
+                try:
+                    ids = [int(x.strip()) for x in bulk_ids.split(",") if x.strip().isdigit()]
+                    if ids and bulk_delete(ids):
+                        st.success(f"✅ Applicants {ids} deleted successfully.")
+                        st.experimental_rerun()
+                except ValueError:
+                    st.error("❌ Invalid IDs. Please enter comma-separated numeric IDs.")
+            else:
+                st.warning("⚠️ Please confirm bulk deletion by ticking the checkbox.")
