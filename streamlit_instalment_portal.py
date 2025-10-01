@@ -237,4 +237,4 @@ with tabs[2]:
             for r in reasons:
                 st.write(r)
         else:
-            st.warning("⚠️ Complete Evaluation inputs first (including EMI).")
+            st.warning("⚠️ Complete Evaluation inputs first")
