@@ -132,9 +132,18 @@ with tabs[0]:
 
     gender = st.radio("Gender", ["M", "F"])
 
+    # Validation rules
+    guarantor_valid = (guarantors == "Yes")
+    female_guarantor_valid = (female_guarantor == "Yes") if guarantors == "Yes" else True
+
+    if not guarantor_valid:
+        st.error("🚫 Application Rejected: No guarantor available.")
+    elif guarantors == "Yes" and not female_guarantor_valid:
+        st.error("🚫 Application Rejected: At least one female guarantor is required.")
+
     info_complete = all([
         first_name, last_name, validate_cnic(cnic), license_suffix,
-        guarantors, (female_guarantor if guarantors == "Yes" else True),
+        guarantor_valid, female_guarantor_valid,
         address, area, city, gender
     ])
 
