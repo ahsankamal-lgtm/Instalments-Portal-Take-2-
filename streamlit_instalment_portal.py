@@ -115,7 +115,7 @@ with tabs[0]:
     area = st.text_input("Area")
     city = st.text_input("City")
 
-    if st.button("📍 View Location on Google Maps"):
+    if st.button("📍 View Location"):
         if address and area and city:
             full_address = f"{address}, {area}, {city}"
             encoded = urllib.parse.quote_plus(full_address)
