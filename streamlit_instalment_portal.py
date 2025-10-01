@@ -308,7 +308,42 @@ with tabs[3]:
     try:
         df = fetch_all_applicants()
         if not df.empty:
+            # Show dataframe with checkboxes
+            df_display = df.copy()
+            df_display["Select"] = False  # add column for selection
+
+            # Selection UI
+            selected_rows = st.multiselect(
+                "✅ Select Applicants to Delete",
+                options=df["id"].tolist(),
+                format_func=lambda x: f"ID {x} - {df.loc[df['id']==x, 'first_name'].values[0]} {df.loc[df['id']==x, 'last_name'].values[0]}"
+            )
+
             st.dataframe(df, use_container_width=True, hide_index=True)
+
+            # Delete button
+            if selected_rows:
+                if st.button("🗑️ Delete Selected Applicants"):
+                    try:
+                        conn = get_db_connection()
+                        cur = conn.cursor()
+
+                        # Delete selected applicants
+                        format_strings = ",".join(["%s"] * len(selected_rows))
+                        cur.execute(f"DELETE FROM data WHERE id IN ({format_strings})", tuple(selected_rows))
+                        conn.commit()
+
+                        # Re-sequence IDs
+                        cur.execute("SET @count = 0")
+                        cur.execute("UPDATE data SET id = @count:=@count+1")
+                        conn.commit()
+
+                        cur.close()
+                        conn.close()
+                        st.success(f"✅ Deleted applicants {selected_rows} and re-sequenced IDs.")
+                        st.experimental_rerun()
+                    except Exception as e:
+                        st.error(f"❌ Failed to delete: {e}")
 
             # 📥 Download Excel Button
             output = BytesIO()
