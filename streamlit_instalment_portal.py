@@ -360,7 +360,7 @@ with tabs[2]:
             st.warning("⚠️ Complete Evaluation inputs first")
 
 # -----------------------------
-# Page 4: Applicants Database (ENHANCED WITH SOFT DELETE)
+# Page 4: Applicants Database (ENHANCED WITH ROW-LEVEL DELETE/RESTORE)
 # -----------------------------
 with tabs[3]:
     st.subheader("👥 Applicants Database")
@@ -384,104 +384,52 @@ with tabs[3]:
     if filtered_db.empty:
         st.info("No applicants found.")
     else:
-        # Filters
-        col1, col2, col3 = st.columns([2, 2, 2])
-        search_cnic = col1.text_input("🔎 Search CNIC")
-        search_name = col2.text_input("🔎 Search Name")
-        filter_city = col3.selectbox("🏙 Filter by City", ["All"] + sorted(df['city'].dropna().unique().tolist()))
+        st.markdown("### 📋 Applicants List")
 
-        filtered = filtered_db.copy()
-        if search_cnic:
-            filtered = filtered[filtered['cnic'].astype(str).str.contains(search_cnic, na=False)]
-        if search_name:
-            filtered = filtered[
-                filtered['first_name'].astype(str).str.contains(search_name, case=False, na=False) |
-                filtered['last_name'].astype(str).str.contains(search_name, case=False, na=False)
-            ]
-        if filter_city and filter_city != "All":
-            filtered = filtered[filtered['city'] == filter_city]
-
-        st.dataframe(filtered, use_container_width=True)
-
-        # Download buttons
-        csv_bytes = df_to_csv_bytes(filtered)
-        st.download_button("📥 Download CSV", data=csv_bytes, file_name="applicants_filtered.csv", mime="text/csv")
-
-        excel_bytes = df_to_excel_bytes(filtered)
-        st.download_button("📥 Download Excel", data=excel_bytes, file_name="applicants_filtered.xlsx",
-                           mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        for idx, row in filtered_db.iterrows():
+            col1, col2 = st.columns([8, 2])
+            with col1:
+                st.write(
+                    f"**ID:** {row['id']} | **Name:** {row['first_name']} {row['last_name']} | "
+                    f"**CNIC:** {row['cnic']} | **City:** {row['city']}"
+                )
+            with col2:
+                if show_deleted:
+                    if st.button(f"♻️ Restore {row['id']}", key=f"restore_{row['id']}"):
+                        try:
+                            conn = get_db_connection()
+                            cur = conn.cursor()
+                            cur.execute("UPDATE data SET is_deleted = 0 WHERE id = %s", (int(row['id']),))
+                            conn.commit()
+                            cur.close()
+                            conn.close()
+                            st.success(f"✅ Applicant {row['id']} restored successfully.")
+                            st.experimental_rerun()
+                        except Exception as e:
+                            st.error(f"❌ Failed to restore: {e}")
+                else:
+                    if st.button(f"🗑 Delete {row['id']}", key=f"delete_{row['id']}"):
+                        try:
+                            conn = get_db_connection()
+                            cur = conn.cursor()
+                            cur.execute("UPDATE data SET is_deleted = 1 WHERE id = %s", (int(row['id']),))
+                            conn.commit()
+                            cur.close()
+                            conn.close()
+                            st.success(f"✅ Applicant {row['id']} deleted (soft delete).")
+                            st.experimental_rerun()
+                        except Exception as e:
+                            st.error(f"❌ Failed to delete: {e}")
 
         st.markdown("---")
-        st.subheader("🗑️ Manage Applicants")
 
-        # Single soft delete / restore
-        single_id = st.number_input("Enter Applicant ID", min_value=1, step=1, key="single_id_action")
+        # Download buttons (full dataset as seen)
+        csv_bytes = df_to_csv_bytes(filtered_db)
+        st.download_button("📥 Download CSV", data=csv_bytes, file_name="applicants.csv", mime="text/csv")
 
-        if st.button("🗑️ Soft Delete Applicant"):
-            if not df[df["id"] == single_id].empty:
-                try:
-                    conn = get_db_connection()
-                    cur = conn.cursor()
-                    cur.execute("UPDATE data SET is_deleted = 1 WHERE id = %s", (int(single_id),))
-                    conn.commit()
-                    cur.close()
-                    conn.close()
-                    st.success(f"✅ Applicant {single_id} marked as deleted.")
-                    st.experimental_rerun()
-                except Exception as e:
-                    st.error(f"❌ Failed to soft delete: {e}")
-            else:
-                st.warning("⚠️ Applicant ID not found.")
-
-        if st.button("♻️ Restore Applicant"):
-            if not df[df["id"] == single_id].empty:
-                try:
-                    conn = get_db_connection()
-                    cur = conn.cursor()
-                    cur.execute("UPDATE data SET is_deleted = 0 WHERE id = %s", (int(single_id),))
-                    conn.commit()
-                    cur.close()
-                    conn.close()
-                    st.success(f"✅ Applicant {single_id} restored successfully.")
-                    st.experimental_rerun()
-                except Exception as e:
-                    st.error(f"❌ Failed to restore: {e}")
-            else:
-                st.warning("⚠️ Applicant ID not found.")
-
-        # Bulk delete / restore
-        st.write("Select multiple applicants to manage:")
-        id_list = filtered['id'].tolist()
-        selected_ids = st.multiselect("Select Applicant IDs", options=id_list, key="bulk_ids")
-
-        colA, colB = st.columns([1, 1])
-        if colA.button("🗑️ Bulk Soft Delete"):
-            try:
-                conn = get_db_connection()
-                cur = conn.cursor()
-                format_strings = ','.join(['%s'] * len(selected_ids))
-                cur.execute(f"UPDATE data SET is_deleted = 1 WHERE id IN ({format_strings})", tuple(selected_ids))
-                conn.commit()
-                cur.close()
-                conn.close()
-                st.success(f"✅ Applicants {selected_ids} marked as deleted.")
-                st.experimental_rerun()
-            except Exception as e:
-                st.error(f"❌ Bulk soft delete failed: {e}")
-
-        if colB.button("♻️ Bulk Restore"):
-            try:
-                conn = get_db_connection()
-                cur = conn.cursor()
-                format_strings = ','.join(['%s'] * len(selected_ids))
-                cur.execute(f"UPDATE data SET is_deleted = 0 WHERE id IN ({format_strings})", tuple(selected_ids))
-                conn.commit()
-                cur.close()
-                conn.close()
-                st.success(f"✅ Applicants {selected_ids} restored successfully.")
-                st.experimental_rerun()
-            except Exception as e:
-                st.error(f"❌ Bulk restore failed: {e}")
+        excel_bytes = df_to_excel_bytes(filtered_db)
+        st.download_button("📥 Download Excel", data=excel_bytes, file_name="applicants.xlsx",
+                           mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
     # Refresh
     if refresh:
