@@ -206,7 +206,7 @@ with tabs[1]:
         residence = st.radio("Residence", ["Owned", "Rented"])
         bike_type = st.selectbox("Bike Type", ["EV-1", "EV-125"])
         bike_price = st.number_input("Bike Price", min_value=0, step=1000, format="%i")
-        outstanding = st.number_input("Outstanding Loan", min_value=0, step=1000, format="%i")
+        outstanding = st.number_input("Other Loans (Outstanding)", min_value=0, step=1000, format="%i")
 
         st.info("➡️ Once inputs are completed, check the Results tab for scoring and decision.")
 
