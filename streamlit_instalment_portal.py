@@ -3,6 +3,7 @@ import re
 import urllib.parse
 import mysql.connector
 import pandas as pd
+from io import BytesIO
 
 # -----------------------------
 # Database Connection
@@ -59,14 +60,19 @@ def validate_phone(phone: str) -> bool:
     """Check phone number length 11–12 characters"""
     return phone.isdigit() and 11 <= len(phone) <= 12
 
+# --- Updated Scoring Logic ---
 def income_score(net_salary, gender):
     if net_salary < 50000:
         base = 0
     elif 50000 <= net_salary < 70000:
-        base = 40
+        base = 20
     elif 70000 <= net_salary < 90000:
+        base = 35
+    elif 90000 <= net_salary < 100000:
+        base = 50
+    elif 100000 <= net_salary < 120000:
         base = 60
-    elif 90000 <= net_salary < 110000:
+    elif 120000 <= net_salary < 150000:
         base = 80
     else:
         base = 100
@@ -82,22 +88,36 @@ def bank_balance_score(balance, emi):
     return min(score, 100)
 
 def salary_consistency_score(months):
-    return min((months / 12) * 100, 100)
+    # Changed from 12M → 6M
+    return min((months / 6) * 100, 100)
 
 def employer_type_score(emp_type):
     mapping = {"Govt": 100, "MNC": 80, "SME": 60, "Startup": 40}
     return mapping.get(emp_type, 0)
 
 def job_tenure_score(years):
-    if years >= 3:
+    if years >= 10:
         return 100
-    elif 1 <= years < 3:
+    elif 5 <= years < 10:
         return 70
+    elif 3 <= years < 5:
+        return 50
+    elif 1 <= years < 3:
+        return 20
     else:
-        return 40
+        return 0
 
 def age_score(age):
-    return 100 if 25 <= age <= 55 else 60
+    if age < 18:
+        return -1   # Auto reject
+    elif 18 <= age < 25:
+        return 80
+    elif 25 <= age <= 30:
+        return 100
+    elif 30 < age <= 40:
+        return 60
+    else:
+        return 30
 
 def dependents_score(dep):
     if dep <= 1:
@@ -114,9 +134,10 @@ def dti_score(outstanding, bike_price, net_salary):
     if net_salary <= 0:
         return 0, 0
     ratio = (outstanding + bike_price) / net_salary
-    if ratio <= 0.5:
+    # multiples of 2 rule
+    if ratio <= 2:
         return 100, ratio
-    elif ratio <= 1:
+    elif ratio <= 4:
         return 70, ratio
     else:
         return 40, ratio
@@ -180,7 +201,6 @@ with tabs[0]:
         st.error("❌ Invalid Phone Number - Please enter a valid phone number")
 
     gender = st.radio("Gender", ["M", "F"])
-
     electricity_bill = st.radio("Is electricity bill available?", ["Yes", "No"])
 
     guarantor_valid = (guarantors == "Yes")
@@ -221,7 +241,7 @@ with tabs[1]:
         net_salary = st.number_input("Net Salary", min_value=0, step=1000, format="%i")
         emi = st.number_input("Monthly Installment (EMI)", min_value=0, step=500, format="%i")
         bank_balance = st.number_input("Average 6M Bank Balance", min_value=0, step=1000, format="%i")
-        salary_consistency = st.number_input("Months with Salary Credit (0–12)", min_value=0, max_value=12, step=1)
+        salary_consistency = st.number_input("Months with Salary Credit (0–6)", min_value=0, max_value=6, step=1)
         employer_type = st.selectbox("Employer Type", ["Govt", "MNC", "SME", "Startup"])
         job_years = st.number_input("Job Tenure (Years)", min_value=0, step=1, format="%i")
         age = st.number_input("Age", min_value=18, max_value=70, step=1, format="%i")
@@ -253,74 +273,77 @@ with tabs[2]:
             res = residence_score(residence)
             dti, ratio = dti_score(outstanding, bike_price, net_salary)
 
-            final = (
-                inc * 0.40 + bal * 0.30 + sal * 0.04 + emp * 0.04 +
-                job * 0.04 + ag * 0.04 + dep * 0.04 + res * 0.05 + dti * 0.05
-            )
-
-            if final >= 75:
-                decision = "✅ Approve"
-            elif final >= 60:
-                decision = "🟡 Review"
+            if ag == -1:
+                st.error("🚫 Application Rejected: Age below 18 is not allowed.")
             else:
-                decision = "❌ Reject"
+                final = (
+                    inc * 0.40 + bal * 0.30 + sal * 0.04 + emp * 0.04 +
+                    job * 0.04 + ag * 0.04 + dep * 0.04 + res * 0.05 + dti * 0.05
+                )
 
-            st.markdown("### 🔹 Detailed Scores")
-            st.write(f"**Income Score (with gender adj.):** {inc:.1f}")
-            st.write(f"**Bank Balance Score (vs. 3× EMI):** {bal:.1f}")
-            st.write(f"**Salary Consistency Score:** {sal:.1f}")
-            st.write(f"**Employer Type Score:** {emp:.1f}")
-            st.write(f"**Job Tenure Score:** {job:.1f}")
-            st.write(f"**Age Score:** {ag:.1f}")
-            st.write(f"**Dependents Score:** {dep:.1f}")
-            st.write(f"**Residence Score:** {res:.1f}")
-            st.write(f"**Debt-to-Income Ratio:** {ratio:.2f}")
-            st.write(f"**Debt-to-Income Score:** {dti:.1f}")
-            st.write(f"**Final Score:** {final:.1f}")
-            st.subheader(f"🏆 Decision: {decision}")
+                if final >= 75:
+                    decision = "✅ Approve"
+                elif final >= 60:
+                    decision = "🟡 Review"
+                else:
+                    decision = "❌ Reject"
 
-            st.markdown("### 📌 Decision Reasons")
-            reasons = []
-            if inc < 60:
-                reasons.append("• Moderate to low income level.")
-            if bal >= 100:
-                reasons.append("• Bank balance fully meets requirement (≥ 3× EMI).")
-            else:
-                reasons.append("• Bank balance below recommended 3× EMI.")
-            if dti < 70:
-                reasons.append("• High debt-to-income ratio, risky.")
-            if final >= 75:
-                reasons.append("• Profile fits approval criteria.")
-            for r in reasons:
-                st.write(r)
+                st.markdown("### 🔹 Detailed Scores")
+                st.write(f"**Income Score (with gender adj.):** {inc:.1f}")
+                st.write(f"**Bank Balance Score (vs. 3× EMI):** {bal:.1f}")
+                st.write(f"**Salary Consistency Score (6M basis):** {sal:.1f}")
+                st.write(f"**Employer Type Score:** {emp:.1f}")
+                st.write(f"**Job Tenure Score:** {job:.1f}")
+                st.write(f"**Age Score:** {ag:.1f}")
+                st.write(f"**Dependents Score:** {dep:.1f}")
+                st.write(f"**Residence Score:** {res:.1f}")
+                st.write(f"**Debt-to-Income Ratio:** {ratio:.2f}")
+                st.write(f"**Debt-to-Income Score:** {dti:.1f}")
+                st.write(f"**Final Score:** {final:.1f}")
+                st.subheader(f"🏆 Decision: {decision}")
 
-            if decision == "✅ Approve":
-                if st.button("💾 Save Applicant to Database"):
-                    try:
-                        save_to_db({
-                            "first_name": first_name,
-                            "last_name": last_name,
-                            "cnic": cnic,
-                            "license_no": license_number,
-                            "guarantors": guarantors,
-                            "female_guarantor": female_guarantor if female_guarantor else "No",
-                            "street_address": street_address,
-                            "area_address": area_address,
-                            "city": city,
-                            "state_province": state_province,
-                            "postal_code": postal_code,
-                            "country": country,
-                            "phone_number": phone_number,
-                            "gender": gender,
-                            "electricity_bill": electricity_bill,
-                            "net_salary": net_salary,
-                            "emi": emi,
-                            "bike_type": bike_type,
-                            "bike_price": bike_price,
-                        })
-                        st.success("✅ Applicant information saved to database successfully!")
-                    except Exception as e:
-                        st.error(f"❌ Failed to save applicant: {e}")
+                st.markdown("### 📌 Decision Reasons")
+                reasons = []
+                if inc < 50:
+                    reasons.append("• Low income category.")
+                if bal >= 100:
+                    reasons.append("• Bank balance fully meets requirement (≥ 3× EMI).")
+                else:
+                    reasons.append("• Bank balance below recommended 3× EMI.")
+                if dti < 70:
+                    reasons.append("• High debt-to-income ratio, risky.")
+                if final >= 75:
+                    reasons.append("• Profile fits approval criteria.")
+                for r in reasons:
+                    st.write(r)
+
+                if decision == "✅ Approve":
+                    if st.button("💾 Save Applicant to Database"):
+                        try:
+                            save_to_db({
+                                "first_name": first_name,
+                                "last_name": last_name,
+                                "cnic": cnic,
+                                "license_no": license_number,
+                                "guarantors": guarantors,
+                                "female_guarantor": female_guarantor if female_guarantor else "No",
+                                "street_address": street_address,
+                                "area_address": area_address,
+                                "city": city,
+                                "state_province": state_province,
+                                "postal_code": postal_code,
+                                "country": country,
+                                "phone_number": phone_number,
+                                "gender": gender,
+                                "electricity_bill": electricity_bill,
+                                "net_salary": net_salary,
+                                "emi": emi,
+                                "bike_type": bike_type,
+                                "bike_price": bike_price,
+                            })
+                            st.success("✅ Applicant information saved to database successfully!")
+                        except Exception as e:
+                            st.error(f"❌ Failed to save applicant: {e}")
         else:
             st.warning("⚠️ Complete Evaluation inputs first")
 
@@ -344,7 +367,6 @@ with tabs[3]:
 
             if st.button("🗑️ Delete Selected Applicant"):
                 try:
-                    # Extract ID from selection
                     delete_id = int(selected_applicant.split(" - ")[0])
 
                     conn = get_db_connection()
@@ -352,7 +374,7 @@ with tabs[3]:
                     cur.execute("DELETE FROM data WHERE id = %s", (delete_id,))
                     conn.commit()
 
-                    # Re-sequence IDs
+                    # Resequence IDs
                     cur.execute("SET @count = 0")
                     cur.execute("UPDATE data SET id = @count:=@count+1")
                     conn.commit()
@@ -365,7 +387,6 @@ with tabs[3]:
                     st.error(f"❌ Failed to delete applicant: {e}")
 
             # 📥 Download Excel Button
-            from io import BytesIO
             output = BytesIO()
             with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
                 df.drop(columns=["full_label"]).to_excel(writer, index=False, sheet_name="Applicants")
