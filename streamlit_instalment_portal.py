@@ -24,8 +24,9 @@ def save_to_db(data: dict):
     INSERT INTO data (
         first_name, last_name, cnic, license_no,
         guarantors, female_guarantor, phone_number,
-        street_address, area_address, city, state, postal_code, country,
-        electricity_bill, gender, net_salary, emi, bike_type, bike_price
+        street_address, area_address, city, state_province, postal_code, country,
+        gender, electricity_bill,
+        net_salary, emi, bike_type, bike_price
     )
     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
     """
@@ -33,8 +34,10 @@ def save_to_db(data: dict):
     values = (
         data["first_name"], data["last_name"], data["cnic"], data["license_no"],
         data["guarantors"], data["female_guarantor"], data["phone_number"],
-        data["street_address"], data["area_address"], data["city"], data["state"], data["postal_code"], data["country"],
-        data["electricity_bill"], data["gender"], data["net_salary"], data["emi"], data["bike_type"], data["bike_price"]
+        data["street_address"], data["area_address"], data["city"], data["state_province"],
+        data["postal_code"], data["country"],
+        data["gender"], data["electricity_bill"],
+        data["net_salary"], data["emi"], data["bike_type"], data["bike_price"]
     )
 
     cursor.execute(query, values)
@@ -144,7 +147,7 @@ with tabs[0]:
     license_suffix = st.text_input("Enter last 3 digits for License Number (#XXX)")
     license_number = f"{cnic}#{license_suffix}" if validate_cnic(cnic) and license_suffix else ""
 
-    phone_number = st.text_input("Phone Number")
+    phone_number = st.text_input("Phone Number (11–12 digits)")
     if phone_number and not validate_phone(phone_number):
         st.error("❌ Invalid Phone Number - Please enter a valid phone number")
 
@@ -153,20 +156,34 @@ with tabs[0]:
     if guarantors == "Yes":
         female_guarantor = st.radio("At least one Female Guarantor?", ["Yes", "No"])
 
-    # New Address Fields
+    # Address fields
     street_address = st.text_input("Street Address")
     area_address = st.text_input("Area Address")
     city = st.text_input("City")
-    state = st.text_input("State / Province")
+    state_province = st.text_input("State/Province")
     postal_code = st.text_input("Postal Code (Optional)")
     country = st.text_input("Country")
 
-    # Electricity Bill
+    if st.button("📍 View Location"):
+        if street_address and area_address and city and state_province and country:
+            full_address = f"{street_address}, {area_address}, {city}, {state_province}, {country} {postal_code or ''}"
+            encoded = urllib.parse.quote_plus(full_address)
+            maps_url = f"https://www.google.com/maps/search/?api=1&query={encoded}"
+
+            js = f"""
+            <script>
+            window.open("{maps_url}", "_blank").focus();
+            </script>
+            """
+            st.components.v1.html(js, height=0, width=0)
+        else:
+            st.error("❌ Please complete all mandatory address fields before viewing on Maps.")
+
+    gender = st.radio("Gender", ["M", "F"])
+
     electricity_bill = st.radio("Is Electricity Bill Available?", ["Yes", "No"])
     if electricity_bill == "No":
         st.error("🚫 Application Rejected: Electricity bill not available.")
-
-    gender = st.radio("Gender", ["M", "F"])
 
     guarantor_valid = (guarantors == "Yes")
     female_guarantor_valid = (female_guarantor == "Yes") if guarantors == "Yes" else True
@@ -179,9 +196,9 @@ with tabs[0]:
     info_complete = all([
         first_name, last_name, validate_cnic(cnic), license_suffix,
         guarantor_valid, female_guarantor_valid,
-        street_address, area_address, city, state, country, gender,
-        validate_phone(phone_number),
-        electricity_bill == "Yes"
+        phone_number and validate_phone(phone_number),
+        street_address, area_address, city, state_province, country,
+        gender, electricity_bill == "Yes"
     ])
 
     st.session_state.applicant_valid = info_complete
@@ -224,7 +241,7 @@ with tabs[2]:
     else:
         st.subheader("📊 Results Summary")
 
-        if 'net_salary' in locals() and net_salary > 0 and 'emi' in locals() and emi > 0:
+        if st.session_state.get("applicant_valid") and 'net_salary' in locals() and net_salary > 0 and 'emi' in locals() and emi > 0:
             inc = income_score(net_salary, gender)
             bal = bank_balance_score(bank_balance, emi)
             sal = salary_consistency_score(salary_consistency)
@@ -261,6 +278,21 @@ with tabs[2]:
             st.write(f"**Final Score:** {final:.1f}")
             st.subheader(f"🏆 Decision: {decision}")
 
+            st.markdown("### 📌 Decision Reasons")
+            reasons = []
+            if inc < 60:
+                reasons.append("• Moderate to low income level.")
+            if bal >= 100:
+                reasons.append("• Bank balance fully meets requirement (≥ 3× EMI).")
+            else:
+                reasons.append("• Bank balance below recommended 3× EMI.")
+            if dti < 70:
+                reasons.append("• High debt-to-income ratio, risky.")
+            if final >= 75:
+                reasons.append("• Profile fits approval criteria.")
+            for r in reasons:
+                st.write(r)
+
             if decision == "✅ Approve":
                 if st.button("💾 Save Applicant to Database"):
                     try:
@@ -275,11 +307,11 @@ with tabs[2]:
                             "street_address": street_address,
                             "area_address": area_address,
                             "city": city,
-                            "state": state,
+                            "state_province": state_province,
                             "postal_code": postal_code,
                             "country": country,
-                            "electricity_bill": electricity_bill,
                             "gender": gender,
+                            "electricity_bill": electricity_bill,
                             "net_salary": net_salary,
                             "emi": emi,
                             "bike_type": bike_type,
@@ -297,10 +329,13 @@ with tabs[2]:
 with tabs[3]:
     st.subheader("📂 Applicants Database")
 
+    if st.button("🔄 Refresh Data"):
+        st.session_state.refresh = True
+
     try:
         df = fetch_all_applicants()
         if not df.empty:
-            st.dataframe(df, use_container_width=True, hide_index=True)
+            st.dataframe(df, use_container_width=True)
 
             # 📥 Download Excel Button
             output = BytesIO()
