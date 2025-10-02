@@ -1,71 +1,100 @@
 import streamlit as st
 import pandas as pd
 import mysql.connector
+from mysql.connector import Error
 from io import BytesIO
-import base64
-from geopy.geocoders import Nominatim
 
 # -----------------------------
-# DB CONNECTION
+# DB Connection
 # -----------------------------
 def get_db_connection():
-    return mysql.connector.connect(
-        host="localhost",
-        user="root",
-        password="yourpassword",
-        database="instalments_db"
-    )
+    try:
+        conn = mysql.connector.connect(
+            host="3.17.21.91",    # update if needed
+            user="ahsan",
+            password="ahsan@321",
+            database="ev_installment_project"
+        )
+        return conn
+    except Error as e:
+        st.error(f"❌ Database connection failed: {e}")
+        return None
 
 # -----------------------------
-# SAVE TO DB
+# Save applicant info
 # -----------------------------
-def save_to_db(data):
+def save_to_db(applicant):
     try:
         conn = get_db_connection()
-        cursor = conn.cursor()
+        if conn is None:
+            return
+        cur = conn.cursor()
 
-        insert_query = """
-        INSERT INTO data 
-        (first_name, last_name, cnic, license_no, guarantors, female_guarantor,
-        street_address, area_address, city, state_province, postal_code, country, phone_number,
-        gender, electricity_bill, net_salary, emi, bike_type, bike_price)
-        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+        query = """
+            INSERT INTO data (
+                first_name, last_name, cnic, license_no, guarantors, female_guarantor,
+                street_address, area_address, city, state_province, postal_code, country,
+                phone_number, gender, electricity_bill, net_salary, emi, bike_type, bike_price
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """
 
-        cursor.execute(insert_query, (
-            data["first_name"], data["last_name"], data["cnic"], data["license_no"],
-            data["guarantors"], data["female_guarantor"], data["street_address"],
-            data["area_address"], data["city"], data["state_province"],
-            data.get("postal_code"), data["country"], data["phone_number"],
-            data["gender"], data["electricity_bill"], data["net_salary"],
-            data["emi"], data["bike_type"], data["bike_price"]
-        ))
+        values = (
+            applicant["first_name"], applicant["last_name"], applicant["cnic"],
+            applicant["license_no"], applicant["guarantors"], applicant["female_guarantor"],
+            applicant["street_address"], applicant["area_address"], applicant["city"],
+            applicant["state_province"], applicant["postal_code"], applicant["country"],
+            applicant["phone_number"], applicant["gender"], applicant["electricity_bill"],
+            applicant["net_salary"], applicant["emi"], applicant["bike_type"], applicant["bike_price"]
+        )
 
+        cur.execute(query, values)
         conn.commit()
-        cursor.close()
+        cur.close()
         conn.close()
-        return True
-    except Exception as e:
+        st.success("✅ Applicant saved successfully!")
+    except Error as e:
         st.error(f"❌ Failed to save applicant: {e}")
-        return False
 
 # -----------------------------
-# FETCH FROM DB
+# Fetch all applicants
 # -----------------------------
 def fetch_all_applicants():
     try:
         conn = get_db_connection()
-        query = "SELECT * FROM data"
+        if conn is None:
+            return pd.DataFrame()
+        query = "SELECT * FROM data ORDER BY created_at DESC"
         df = pd.read_sql(query, conn)
         conn.close()
         return df
-    except Exception as e:
+    except Error as e:
         st.error(f"❌ Failed to load applicants: {e}")
         return pd.DataFrame()
 
 # -----------------------------
-# EXPORT TO EXCEL
+# Delete applicant
 # -----------------------------
+def delete_applicant(applicant_id):
+    try:
+        conn = get_db_connection()
+        if conn is None:
+            return
+        cur = conn.cursor()
+        cur.execute("DELETE FROM data WHERE id = %s", (applicant_id,))
+        conn.commit()
+        cur.close()
+        conn.close()
+        st.success(f"✅ Applicant with ID {applicant_id} deleted.")
+    except Error as e:
+        st.error(f"❌ Failed to delete applicant: {e}")
+
+# -----------------------------
+# File export helpers
+# -----------------------------
+def df_to_csv_bytes(df):
+    return df.to_csv(index=False).encode("utf-8")
+
 def df_to_excel_bytes(df):
     output = BytesIO()
     with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
@@ -73,107 +102,25 @@ def df_to_excel_bytes(df):
     return output.getvalue()
 
 # -----------------------------
-# SCORING FUNCTIONS (from Excel rules)
+# Streamlit App
 # -----------------------------
-def score_net_salary(net_salary, gender):
-    if net_salary < 50000:
-        score = 0
-    elif 50000 <= net_salary < 70000:
-        score = 20
-    elif 70000 <= net_salary < 90000:
-        score = 35
-    elif 90000 <= net_salary < 100000:
-        score = 50
-    elif 100000 <= net_salary < 120000:
-        score = 60
-    elif 120000 <= net_salary < 150000:
-        score = 80
-    else:
-        score = 100
+st.set_page_config(page_title="Applicant Portal", layout="wide")
+st.title("📋 Instalment Applicant Portal")
 
-    if gender == "F":
-        score = min(score * 1.1, 100)  # 10% bonus for females
-    return score
-
-def score_bank_balance(avg_balance, emi):
-    required = emi * 3
-    score = (avg_balance / required) * 100 if required > 0 else 0
-    return min(score, 100)
-
-def score_salary_consistency(months_credited):
-    return (months_credited / 6) * 100
-
-def score_employer_type(employer_type):
-    mapping = {
-        "Govt": 100,
-        "Semi-Govt": 80,
-        "Private": 70,
-        "Self-Employed": 40
-    }
-    return mapping.get(employer_type, 0)
-
-def score_job_tenure(years):
-    if years >= 10:
-        return 100
-    elif years >= 5:
-        return 70
-    elif years >= 3:
-        return 50
-    elif years >= 1:
-        return 20
-    else:
-        return 0
-
-def score_age(age):
-    if age < 18:
-        return -999  # auto reject
-    elif 18 <= age <= 24:
-        return 80
-    elif 25 <= age <= 30:
-        return 100
-    elif 31 <= age <= 40:
-        return 60
-    else:
-        return 30
-
-def score_dependents(dep):
-    if dep <= 1:
-        return 100
-    elif dep == 2:
-        return 70
-    else:
-        return 40
-
-def score_residence(residence):
-    return 100 if residence == "Owned" else 60
-
-def score_dti(loans, bike_price, salary):
-    ratio = (loans + bike_price) / salary if salary > 0 else 999
-    if ratio <= 2:
-        return 100
-    elif ratio <= 4:
-        return 70
-    else:
-        return 40
-
-# -----------------------------
-# STREAMLIT UI
-# -----------------------------
-st.set_page_config(page_title="Instalment Scoring Portal", layout="wide")
 tabs = st.tabs(["Applicant Info", "Evaluation", "Results", "Applicants Database"])
 
 # -----------------------------
 # Page 1: Applicant Info
 # -----------------------------
 with tabs[0]:
-    st.header("📋 Applicant Information")
+    st.subheader("📝 Applicant Information")
 
     first_name = st.text_input("First Name")
     last_name = st.text_input("Last Name")
     cnic = st.text_input("CNIC")
-    license_no = st.text_input("License No")
-    guarantors = st.selectbox("Guarantors Provided?", ["Yes", "No"])
-    female_guarantor = st.selectbox("Female Guarantor?", ["Yes", "No"])
+    license_no = st.text_input("License Number")
+    guarantors = st.text_input("Number of Guarantors")
+    female_guarantor = st.text_input("Female Guarantor (Yes/No)")
 
     # Address fields
     street_address = st.text_input("Street Address")
@@ -183,24 +130,30 @@ with tabs[0]:
     postal_code = st.text_input("Postal Code (Optional)")
     country = st.text_input("Country")
 
-    # Phone validation
-    phone_number = st.text_input("Phone Number")
+    # Phone with validation
+    phone_number = st.text_input("Phone Number (11-12 digits)")
     if phone_number and (len(phone_number) < 11 or len(phone_number) > 12):
-        st.error("Invalid Phone Number - Please enter a valid phone number")
+        st.error("❌ Invalid Phone Number - Please enter a valid phone number")
 
     gender = st.selectbox("Gender", ["M", "F"])
+
+    # Electricity bill check
     electricity_bill = st.radio("Is electricity bill available?", ["Yes", "No"])
+    if electricity_bill == "No":
+        st.error("⚠️ Applicant rejected: Electricity bill required to continue.")
+        st.stop()
 
     net_salary = st.number_input("Net Salary", min_value=0)
-    emi = st.number_input("EMI", min_value=0)
+    emi = st.number_input("Expected EMI", min_value=0)
     bike_type = st.text_input("Bike Type")
     bike_price = st.number_input("Bike Price", min_value=0)
 
-    if electricity_bill == "No":
-        st.error("❌ Applicant Rejected - Electricity bill not available")
-    else:
-        if st.button("Save Applicant"):
-            data = {
+    # Save applicant button
+    if st.button("💾 Save Applicant"):
+        if not phone_number or len(phone_number) not in [11, 12]:
+            st.error("❌ Invalid Phone Number - Please enter a valid phone number")
+        else:
+            applicant = {
                 "first_name": first_name,
                 "last_name": last_name,
                 "cnic": cnic,
@@ -219,16 +172,21 @@ with tabs[0]:
                 "net_salary": net_salary,
                 "emi": emi,
                 "bike_type": bike_type,
-                "bike_price": bike_price
+                "bike_price": bike_price,
             }
-            if save_to_db(data):
-                st.success("✅ Applicant saved successfully!")
+            save_to_db(applicant)
+
+    # View Location button
+    if st.button("📍 View Location on Map"):
+        full_address = f"{street_address}, {area_address}, {city}, {state_province}, {country}"
+        st.map(pd.DataFrame({"lat": [24.8607], "lon": [67.0011]}))  # Placeholder map (Karachi)
+        st.info(f"Showing location for: {full_address}")
 
 # -----------------------------
 # Page 4: Applicants Database
 # -----------------------------
 with tabs[3]:
-    st.header("👥 Applicants Database")
+    st.subheader("👥 Applicants Database")
 
     df = fetch_all_applicants()
     if df.empty:
@@ -236,28 +194,22 @@ with tabs[3]:
     else:
         st.dataframe(df, use_container_width=True)
 
-        # Download Excel
+        # Download buttons
+        csv_bytes = df_to_csv_bytes(df)
+        st.download_button("📥 Download CSV", data=csv_bytes,
+                           file_name="applicants.csv", mime="text/csv")
+
         excel_bytes = df_to_excel_bytes(df)
         st.download_button("📥 Download Excel", data=excel_bytes,
                            file_name="applicants.xlsx",
                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
-        # Safe delete dropdown
+        # Delete applicant dropdown
         st.subheader("🗑️ Delete Applicant")
-        options = [f"{row['id']} - {row['first_name']} {row['last_name']}" for _, row in df.iterrows()]
-        selected = st.selectbox("Select Applicant to Delete", options)
+        applicant_options = [f"{row['id']} - {row['first_name']} {row['last_name']}" for _, row in df.iterrows()]
+        selected = st.selectbox("Select applicant to delete", ["--Select--"] + applicant_options)
 
-        if st.button("Delete Selected Applicant"):
-            if selected:
-                selected_id = int(selected.split(" - ")[0])
-                try:
-                    conn = get_db_connection()
-                    cur = conn.cursor()
-                    cur.execute("DELETE FROM data WHERE id = %s", (selected_id,))
-                    conn.commit()
-                    cur.close()
-                    conn.close()
-                    st.success(f"✅ Applicant {selected_id} deleted successfully.")
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"❌ Failed to delete applicant: {e}")
+        if selected != "--Select--":
+            selected_id = int(selected.split(" - ")[0])
+            if st.button("Confirm Delete"):
+                delete_applicant(selected_id)
