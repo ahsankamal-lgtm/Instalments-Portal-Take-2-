@@ -355,7 +355,7 @@ with tabs[3]:
                     cur.close()
                     conn.close()
                     st.success(f"✅ Applicant with ID {delete_id} deleted successfully and IDs resequenced.")
-                    st.experimental_rerun()
+                    st.rerun()
                 except Exception as e:
                     st.error(f"❌ Failed to delete applicant: {e}")
 
