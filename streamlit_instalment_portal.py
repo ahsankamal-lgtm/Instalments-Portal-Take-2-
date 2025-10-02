@@ -23,16 +23,18 @@ def save_to_db(data: dict):
     query = """
     INSERT INTO data (
         first_name, last_name, cnic, license_no,
-        guarantors, female_guarantor, address, area, city, gender,
-        net_salary, emi, bike_type, bike_price
+        guarantors, female_guarantor, phone_number,
+        street_address, area_address, city, state, postal_code, country,
+        electricity_bill, gender, net_salary, emi, bike_type, bike_price
     )
-    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
     """
 
     values = (
         data["first_name"], data["last_name"], data["cnic"], data["license_no"],
-        data["guarantors"], data["female_guarantor"], data["address"], data["area"], data["city"], data["gender"],
-        data["net_salary"], data["emi"], data["bike_type"], data["bike_price"]
+        data["guarantors"], data["female_guarantor"], data["phone_number"],
+        data["street_address"], data["area_address"], data["city"], data["state"], data["postal_code"], data["country"],
+        data["electricity_bill"], data["gender"], data["net_salary"], data["emi"], data["bike_type"], data["bike_price"]
     )
 
     cursor.execute(query, values)
@@ -52,6 +54,9 @@ def fetch_all_applicants():
 # -----------------------------
 def validate_cnic(cnic: str) -> bool:
     return bool(re.fullmatch(r"\d{5}-\d{7}-\d", cnic))
+
+def validate_phone(phone: str) -> bool:
+    return phone.isdigit() and 11 <= len(phone) <= 12
 
 def income_score(net_salary, gender):
     if net_salary < 50000:
@@ -139,29 +144,27 @@ with tabs[0]:
     license_suffix = st.text_input("Enter last 3 digits for License Number (#XXX)")
     license_number = f"{cnic}#{license_suffix}" if validate_cnic(cnic) and license_suffix else ""
 
+    phone_number = st.text_input("Phone Number")
+    if phone_number and not validate_phone(phone_number):
+        st.error("❌ Invalid Phone Number - Please enter a valid phone number")
+
     guarantors = st.radio("Guarantors Available?", ["Yes", "No"])
     female_guarantor = None
     if guarantors == "Yes":
         female_guarantor = st.radio("At least one Female Guarantor?", ["Yes", "No"])
 
-    address = st.text_input("Address")
-    area = st.text_input("Area")
+    # New Address Fields
+    street_address = st.text_input("Street Address")
+    area_address = st.text_input("Area Address")
     city = st.text_input("City")
+    state = st.text_input("State / Province")
+    postal_code = st.text_input("Postal Code (Optional)")
+    country = st.text_input("Country")
 
-    if st.button("📍 View Location"):
-        if address and area and city:
-            full_address = f"{address}, {area}, {city}"
-            encoded = urllib.parse.quote_plus(full_address)
-            maps_url = f"https://www.google.com/maps/search/?api=1&query={encoded}"
-
-            js = f"""
-            <script>
-            window.open("{maps_url}", "_blank").focus();
-            </script>
-            """
-            st.components.v1.html(js, height=0, width=0)
-        else:
-            st.error("❌ Please complete Address, Area, and City before viewing on Maps.")
+    # Electricity Bill
+    electricity_bill = st.radio("Is Electricity Bill Available?", ["Yes", "No"])
+    if electricity_bill == "No":
+        st.error("🚫 Application Rejected: Electricity bill not available.")
 
     gender = st.radio("Gender", ["M", "F"])
 
@@ -176,7 +179,9 @@ with tabs[0]:
     info_complete = all([
         first_name, last_name, validate_cnic(cnic), license_suffix,
         guarantor_valid, female_guarantor_valid,
-        address, area, city, gender
+        street_address, area_address, city, state, country, gender,
+        validate_phone(phone_number),
+        electricity_bill == "Yes"
     ])
 
     st.session_state.applicant_valid = info_complete
@@ -184,7 +189,7 @@ with tabs[0]:
     if info_complete:
         st.success("✅ Applicant Information completed. Proceed to Evaluation tab.")
     else:
-        st.warning("⚠️ Please complete all fields before proceeding.")
+        st.warning("⚠️ Please complete all required fields before proceeding.")
 
 # -----------------------------
 # Page 2: Evaluation
@@ -219,7 +224,7 @@ with tabs[2]:
     else:
         st.subheader("📊 Results Summary")
 
-        if st.session_state.get("applicant_valid") and 'net_salary' in locals() and net_salary > 0 and 'emi' in locals() and emi > 0:
+        if 'net_salary' in locals() and net_salary > 0 and 'emi' in locals() and emi > 0:
             inc = income_score(net_salary, gender)
             bal = bank_balance_score(bank_balance, emi)
             sal = salary_consistency_score(salary_consistency)
@@ -256,21 +261,6 @@ with tabs[2]:
             st.write(f"**Final Score:** {final:.1f}")
             st.subheader(f"🏆 Decision: {decision}")
 
-            st.markdown("### 📌 Decision Reasons")
-            reasons = []
-            if inc < 60:
-                reasons.append("• Moderate to low income level.")
-            if bal >= 100:
-                reasons.append("• Bank balance fully meets requirement (≥ 3× EMI).")
-            else:
-                reasons.append("• Bank balance below recommended 3× EMI.")
-            if dti < 70:
-                reasons.append("• High debt-to-income ratio, risky.")
-            if final >= 75:
-                reasons.append("• Profile fits approval criteria.")
-            for r in reasons:
-                st.write(r)
-
             if decision == "✅ Approve":
                 if st.button("💾 Save Applicant to Database"):
                     try:
@@ -281,9 +271,14 @@ with tabs[2]:
                             "license_no": license_number,
                             "guarantors": guarantors,
                             "female_guarantor": female_guarantor if female_guarantor else "No",
-                            "address": address,
-                            "area": area,
+                            "phone_number": phone_number,
+                            "street_address": street_address,
+                            "area_address": area_address,
                             "city": city,
+                            "state": state,
+                            "postal_code": postal_code,
+                            "country": country,
+                            "electricity_bill": electricity_bill,
                             "gender": gender,
                             "net_salary": net_salary,
                             "emi": emi,
@@ -302,48 +297,10 @@ with tabs[2]:
 with tabs[3]:
     st.subheader("📂 Applicants Database")
 
-    if st.button("🔄 Refresh Data"):
-        st.session_state.refresh = True
-
     try:
         df = fetch_all_applicants()
         if not df.empty:
-            # Show dataframe with checkboxes
-            df_display = df.copy()
-            df_display["Select"] = False  # add column for selection
-
-            # Selection UI
-            selected_rows = st.multiselect(
-                "✅ Select Applicants to Delete",
-                options=df["id"].tolist(),
-                format_func=lambda x: f"ID {x} - {df.loc[df['id']==x, 'first_name'].values[0]} {df.loc[df['id']==x, 'last_name'].values[0]}"
-            )
-
             st.dataframe(df, use_container_width=True, hide_index=True)
-
-            # Delete button
-            if selected_rows:
-                if st.button("🗑️ Delete Selected Applicants"):
-                    try:
-                        conn = get_db_connection()
-                        cur = conn.cursor()
-
-                        # Delete selected applicants
-                        format_strings = ",".join(["%s"] * len(selected_rows))
-                        cur.execute(f"DELETE FROM data WHERE id IN ({format_strings})", tuple(selected_rows))
-                        conn.commit()
-
-                        # Re-sequence IDs
-                        cur.execute("SET @count = 0")
-                        cur.execute("UPDATE data SET id = @count:=@count+1")
-                        conn.commit()
-
-                        cur.close()
-                        conn.close()
-                        st.success(f"✅ Deleted applicants {selected_rows} and re-sequenced IDs.")
-                        st.experimental_rerun()
-                    except Exception as e:
-                        st.error(f"❌ Failed to delete: {e}")
 
             # 📥 Download Excel Button
             output = BytesIO()
@@ -357,7 +314,6 @@ with tabs[3]:
                 file_name="applicants.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
-
         else:
             st.info("ℹ️ No applicants found in the database yet.")
     except Exception as e:
