@@ -336,22 +336,43 @@ with tabs[3]:
     try:
         df = fetch_all_applicants()
         if not df.empty:
-            # Search and filter options
-            search_cnic = st.text_input("🔎 Search by CNIC")
-            filter_city = st.selectbox("🏙️ Filter by City", ["All"] + sorted(df["city"].unique().tolist()))
-            filter_gender = st.selectbox("⚧ Filter by Gender", ["All"] + sorted(df["gender"].unique().tolist()))
-
-            # Apply filters
-            if search_cnic:
-                df = df[df["cnic"].str.contains(search_cnic, case=False, na=False)]
-            if filter_city != "All":
-                df = df[df["city"] == filter_city]
-            if filter_gender != "All":
-                df = df[df["gender"] == filter_gender]
-
             st.dataframe(df, use_container_width=True, hide_index=True)
+
+            # Delete Row by ID
+            delete_id = st.number_input("Enter Applicant ID to Delete", min_value=1, step=1)
+            if st.button("🗑️ Delete Applicant"):
+                try:
+                    conn = get_db_connection()
+                    cur = conn.cursor()
+                    cur.execute("DELETE FROM data WHERE id = %s", (delete_id,))
+                    conn.commit()
+
+                    # Re-sequence IDs
+                    cur.execute("SET @count = 0")
+                    cur.execute("UPDATE data SET id = @count:=@count+1")
+                    conn.commit()
+
+                    cur.close()
+                    conn.close()
+                    st.success(f"✅ Applicant with ID {delete_id} deleted successfully and IDs resequenced.")
+                    st.experimental_rerun()
+                except Exception as e:
+                    st.error(f"❌ Failed to delete applicant: {e}")
+
+            # 📥 Download Excel Button
+            output = BytesIO()
+            with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
+                df.to_excel(writer, index=False, sheet_name="Applicants")
+            excel_data = output.getvalue()
+
+            st.download_button(
+                label="📥 Download Excel",
+                data=excel_data,
+                file_name="applicants.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+
         else:
             st.info("ℹ️ No applicants found in the database yet.")
     except Exception as e:
         st.error(f"❌ Failed to load applicants: {e}")
-
