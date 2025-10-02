@@ -338,10 +338,15 @@ with tabs[3]:
         if not df.empty:
             st.dataframe(df, use_container_width=True, hide_index=True)
 
-            # Delete Row by ID
-            delete_id = st.number_input("Enter Applicant ID to Delete", min_value=1, step=1)
-            if st.button("🗑️ Delete Applicant"):
+            # Dropdown for Delete Row
+            df["full_label"] = df.apply(lambda row: f"{row['id']} - {row['first_name']} {row['last_name']}", axis=1)
+            selected_applicant = st.selectbox("Select Applicant to Delete", options=df["full_label"].tolist())
+
+            if st.button("🗑️ Delete Selected Applicant"):
                 try:
+                    # Extract ID from selection
+                    delete_id = int(selected_applicant.split(" - ")[0])
+
                     conn = get_db_connection()
                     cur = conn.cursor()
                     cur.execute("DELETE FROM data WHERE id = %s", (delete_id,))
@@ -354,15 +359,16 @@ with tabs[3]:
 
                     cur.close()
                     conn.close()
-                    st.success(f"✅ Applicant with ID {delete_id} deleted successfully and IDs resequenced.")
+                    st.success(f"✅ Applicant {selected_applicant} deleted successfully and IDs resequenced.")
                     st.rerun()
                 except Exception as e:
                     st.error(f"❌ Failed to delete applicant: {e}")
 
             # 📥 Download Excel Button
+            from io import BytesIO
             output = BytesIO()
             with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
-                df.to_excel(writer, index=False, sheet_name="Applicants")
+                df.drop(columns=["full_label"]).to_excel(writer, index=False, sheet_name="Applicants")
             excel_data = output.getvalue()
 
             st.download_button(
