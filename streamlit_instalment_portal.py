@@ -1,9 +1,11 @@
+
 import streamlit as st
 import re
 import urllib.parse
 import mysql.connector
 import pandas as pd
 from io import BytesIO
+
 
 # -----------------------------
 # Database Connection
@@ -15,121 +17,418 @@ def get_db_connection():
         password="ahsan@321",
         database="ev_installment_project"
     )
-
 def save_to_db(data: dict):
     conn = get_db_connection()
     cursor = conn.cursor()
 
-    query = """
-    INSERT INTO data (
-        first_name, last_name, cnic, license_no,
-        guarantors, female_guarantor, phone_number,
-        street_address, area_address, city, state_province, postal_code, country,
-        gender, electricity_bill,
-        net_salary, emi, bike_type, bike_price
-    )
-    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-    """
+    # --- Check if CNIC already exists ---
+    cursor.execute("SELECT COUNT(*) FROM data WHERE cnic = %s", (data["cnic"],))
+    (exists,) = cursor.fetchone()
+    if exists > 0:
+        cursor.close()
+        conn.close()
+        raise ValueError("❌ CNIC already exists in the database. Please enter a unique CNIC.")
 
+    # Columns in the exact order we will pass values
+    columns = [
+        "name", "cnic", "license_no",
+        "phone_number", "gender",
+        "guarantors", "female_guarantor", "electricity_bill", "pdc_option",  
+        "education", "occupation", "designation",
+        "employer_name", "employer_contact",
+        "address", "city", "state_province", "postal_code", "country",
+        "net_salary", "applicant_bank_balance", "guarantor_bank_balance",
+        "employer_type", "age", "residence",
+        "bike_type", "bike_price", "down_payment", "tenure", "emi",
+        "outstanding",
+        "decision"
+    ]
+
+    full_name = f"{data['first_name']} {data['last_name']}".strip()
+    full_address = f"{data['street_address']}, {data['area_address']}"
+
+    # Values in the same order as `columns`
     values = (
-        data["first_name"], data["last_name"], data["cnic"], data["license_no"],
-        data["guarantors"], data["female_guarantor"], data["phone_number"],
-        data["street_address"], data["area_address"], data["city"], data["state_province"],
-        data["postal_code"], data["country"],
-        data["gender"], data["electricity_bill"],
-        data["net_salary"], data["emi"], data["bike_type"], data["bike_price"]
+        full_name, data["cnic"], data["license_no"],
+        data["phone_number"], data["gender"],
+        data["guarantors"], data["female_guarantor"], data["electricity_bill"], data["pdc_option"],
+        data.get("education"), data.get("occupation"), data.get("designation"),
+        data.get("employer_name"), data.get("employer_contact"),
+        full_address, data["city"], data["state_province"], data["postal_code"], data["country"],
+        data["net_salary"], data["applicant_bank_balance"], data.get("guarantor_bank_balance"),
+        data["employer_type"], data["age"], data["residence"],
+        data["bike_type"], data["bike_price"], data["down_payment"], data["tenure"], data["emi"],data["outstanding"],
+        data["decision"]
     )
+
+
+    # Build placeholders dynamically so counts always match
+    placeholders = ", ".join(["%s"] * len(values))
+    cols_sql = ", ".join(columns)
+    query = f"INSERT INTO data ({cols_sql}) VALUES ({placeholders})"
 
     cursor.execute(query, values)
     conn.commit()
     cursor.close()
     conn.close()
 
+
 def fetch_all_applicants():
     conn = get_db_connection()
-    query = "SELECT * FROM data"
+    query = """
+    SELECT 
+        id, 
+        name, 
+        cnic, 
+        license_no,
+        phone_number, 
+        gender,
+        guarantors, 
+        female_guarantor, 
+        electricity_bill,
+        pdc_option,
+        education, 
+        occupation, 
+        designation,
+        employer_name,
+        employer_contact,
+        address, 
+        city, 
+        state_province, 
+        postal_code, 
+        country,
+        net_salary, 
+        applicant_bank_balance, 
+        guarantor_bank_balance,
+        employer_type, 
+        age, 
+        residence,
+        bike_type, 
+        bike_price, 
+        down_payment,
+        tenure,
+        emi, 
+        outstanding,
+        decision
+    FROM data
+    ORDER BY id ASC;
+    """
     df = pd.read_sql(query, conn)
     conn.close()
     return df
 
+
+def resequence_ids():
+    """ Re-sequence IDs after deletion and reset AUTO_INCREMENT """
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SET @count = 0;")
+        cursor.execute("UPDATE data SET id = (@count := @count + 1)")
+        cursor.execute("ALTER TABLE data AUTO_INCREMENT = 1")
+        conn.commit()
+        cursor.close()
+        conn.close()
+        st.success("✅ IDs resequenced successfully!")
+    except Exception as e:
+        st.error(f"❌ Failed to resequence IDs: {e}")
+
+import math
+import re
+
 # -----------------------------
-# Utility Functions
+# Validation Functions
 # -----------------------------
 def validate_cnic(cnic: str) -> bool:
-    return bool(re.fullmatch(r"\d{5}-\d{7}-\d", cnic))
+    return bool(re.fullmatch(r"\d{5}-?\d{7}-?\d", cnic))
+
 
 def validate_phone(phone: str) -> bool:
-    return phone.isdigit() and 11 <= len(phone) <= 12
+    return phone.isdigit() and len(phone) == 11
 
+# -----------------------------
+# Scoring Functions
+# -----------------------------
 def income_score(net_salary, gender):
     if net_salary < 50000:
         base = 0
-    elif 50000 <= net_salary < 70000:
-        base = 40
-    elif 70000 <= net_salary < 90000:
+    elif net_salary < 70000:
+        base = 20
+    elif net_salary < 90000:
+        base = 35
+    elif net_salary < 100000:
+        base = 50
+    elif net_salary < 120000:
         base = 60
-    elif 90000 <= net_salary < 110000:
+    elif net_salary < 150000:
         base = 80
     else:
         base = 100
     if gender == "F":
         base *= 1.1
     return min(base, 100)
+    
+def bank_balance_score_custom(applicant_balance, guarantor_balance, emi):
+    """
+    Binary scoring logic:
+    - Applicant >= 3x EMI → 100
+    - Guarantor >= 6x EMI → 100
+    - If both provided:
+        → Applicant takes priority if both qualify
+    """
+    score = 0
+    source = "None"
 
-def bank_balance_score(balance, emi):
-    if emi <= 0:
-        return 0
-    threshold = emi * 3
-    score = (balance / threshold) * 100
-    return min(score, 100)
+    applicant_ok = applicant_balance is not None and applicant_balance >= 3 * emi
+    guarantor_ok = guarantor_balance is not None and guarantor_balance >= 6 * emi
+
+    if applicant_ok and guarantor_ok:
+        score, source = 100, "Applicant (Priority)"
+    elif applicant_ok:
+        score, source = 100, "Applicant"
+    elif guarantor_ok:
+        score, source = 100, "Guarantor"
+    else:
+        score, source = 0, "None"
+
+    return score, source
+
 
 def salary_consistency_score(months):
-    return min((months / 12) * 100, 100)
+    return min((months / 6) * 100, 100)
 
 def employer_type_score(emp_type):
-    mapping = {"Govt": 100, "MNC": 80, "SME": 60, "Startup": 40}
+    mapping = {"Govt": 100, "MNC": 80, "Private Limited": 70, "SME": 60, "Startup": 40, "Self-employed": 20}
     return mapping.get(emp_type, 0)
 
 def job_tenure_score(years):
-    if years >= 3:
+    if years >= 10:
         return 100
-    elif 1 <= years < 3:
+    elif years >= 5:
         return 70
+    elif years >= 3:
+        return 50
+    elif years >= 1:
+        return 20
     else:
-        return 40
+        return 0
 
 def age_score(age):
-    return 100 if 25 <= age <= 55 else 60
+    if age < 18:
+        return -1  # reject
+    elif age <= 25:
+        return 80
+    elif age <= 30:
+        return 100
+    elif age <= 40:
+        return 60
+    else:
+        return 30
 
 def dependents_score(dep):
-    if dep <= 1:
+    if dep == 0:
         return 100
-    elif dep == 2:
-        return 70
+    elif dep <= 2:
+        return 80
+    elif dep <= 4:
+        return 60
     else:
         return 40
 
 def residence_score(res):
-    return 100 if res == "Owned" else 60
+    mapping = {"Owned": 100, "Family": 80, "Rented": 60, "Temporary": 40}
+    return mapping.get(res, 0)
 
-def dti_score(outstanding, bike_price, net_salary):
-    if net_salary <= 0:
+def dti_score(outstanding, emi, net_salary, tenure):
+    """
+    Debt-to-Income (DTI) Score:
+    ratio = (Outstanding / tenure + EMI) / Net Salary
+    """
+    if net_salary <= 0 or tenure <= 0:
         return 0, 0
-    ratio = (outstanding + bike_price) / net_salary
-    if ratio <= 0.5:
-        return 100, ratio
-    elif ratio <= 1:
-        return 70, ratio
+
+    monthly_obligation = (outstanding / tenure) + emi
+    ratio = monthly_obligation / net_salary
+
+    if ratio <= 0.1:
+        score = 100
+    elif ratio <= 0.2:
+        score = 80
+    elif ratio <= 0.3:
+        score = 60
+    elif ratio <= 0.5:
+        score = 40
     else:
-        return 40, ratio
+        score = 20
+
+    return score, ratio
+
+def calculate_min_emi(bike_price, down_payment, tenure):
+    """Minimum EMI needed to cover bike price"""
+    if tenure <= 0:
+        return 0
+    return math.ceil((bike_price - down_payment) / tenure)
+
+def bank_balance_score_business(applicant_balance, emi):
+    """
+    For self-employed / businessman:
+    - If applicant_bank_balance >= 6 * emi: score = 100
+    - Else: score = 0
+    Returns (score, source)
+    """
+    if applicant_balance is None:
+        return 0, "None"
+    if emi is None or emi <= 0:
+        return 0, "None"
+    if applicant_balance >= 6 * emi:
+        return 100, "Applicant (>=6×EMI)"
+    return 0, "Applicant (<6×EMI)"
+
+
+import streamlit as st
+
+# --- PAGE CONFIG ---
+st.set_page_config(page_title="EV Bike Finance Portal", layout="centered")
+
+# --- SESSION STATE INIT ---
+if 'app_started' not in st.session_state:
+    st.session_state['app_started'] = False
+
+# --- LANDING PAGE ---
+if not st.session_state['app_started']:
+    # Custom styling (gradient background + blue button)
+    page_bg = """
+    <style>
+    [data-testid="stAppViewContainer"] {
+        background: linear-gradient(135deg, #001F3F 0%, #0074D9 50%, #7FDBFF 100%);
+        color: white;
+        padding-top: 6rem;
+    }
+    [data-testid="stHeader"] {background: rgba(0,0,0,0);}
+    .title {
+        font-size: 2.8rem;
+        font-weight: 800;
+        margin-bottom: 1rem;
+        text-align: center;
+        background: linear-gradient(to right, #7FDBFF, #39CCCC, #01FF70);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+    }
+    .subtitle {
+        font-size: 1.1rem;
+        color: #E0E0E0;
+        text-align: center;
+        margin-bottom: 2.5rem;
+    }
+    .divider {
+        border: none;
+        height: 1px;
+        background-color: rgba(255, 255, 255, 0.3);
+        margin: 2rem 0;
+    }
+    /* --- Custom blue button --- */
+    div.stButton > button:first-child {
+        background-color: #0074D9;
+        color: white;
+        border: none;
+        padding: 0.75rem 1.5rem;
+        border-radius: 10px;
+        font-size: 1.1rem;
+        font-weight: 600;
+        transition: 0.3s ease-in-out;
+    }
+    div.stButton > button:first-child:hover {
+        background-color: #005fa3;
+        transform: translateY(-2px);
+        box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+    }
+    </style>
+    """
+    st.markdown(page_bg, unsafe_allow_html=True)
+
+    # Main content block
+    st.markdown('<h1 class="title">⚡ EV Bike Finance Portal</h1>', unsafe_allow_html=True)
+    st.markdown(
+        '<p class="subtitle">A unified digital platform to evaluate, approve, and manage electric bike financing — faster, smarter, and sustainable.</p>',
+        unsafe_allow_html=True
+    )
+
+    st.markdown('<hr class="divider">', unsafe_allow_html=True)
+
+    # CTA button (blue now!)
+    if st.button("🚀 Start New Application", use_container_width=True):
+        st.session_state['app_started'] = True
+        st.rerun()
+
+    st.stop()
+st.markdown(
+    """
+    <style>
+    /* 🔵 Global Blue Gradient Background */
+    [data-testid="stAppViewContainer"] {
+        background: linear-gradient(to bottom right, #004aad, #5de0e6);
+        background-attachment: fixed;
+    }
+
+    /* 📄 Solid White Form Container */
+    .block-container {
+        background-color: #ffffff;  /* Fully opaque white */
+        padding: 2rem 3rem;
+        border-radius: 20px;
+        box-shadow: 0px 3px 10px rgba(0,0,0,0.2);
+        margin-top: 2rem;
+        margin-bottom: 2rem;
+    }
+
+    /* 🌈 Headings on Blue Background (Landing Page Titles) */
+    h1, h2, h3, h4 {
+        color: #ffffff;
+        font-weight: 700;
+    }
+
+    /* 🧾 Form and Body Text (on white areas) */
+    .stTextInput label,
+    .stSelectbox label,
+    .stNumberInput label,
+    .stRadio label,
+    .stCheckbox label,
+    p, span, div, label {
+        color: #002b80 !important;  /* Dark blue text for readability */
+    }
+
+    /* 💾 Primary Buttons */
+    button[kind="primary"] {
+        background-color: #004aad !important;
+        color: white !important;
+        font-weight: 600 !important;
+        border-radius: 10px !important;
+        border: none !important;
+    }
+
+    button[kind="primary"]:hover {
+        background-color: #0059d6 !important;
+        color: white !important;
+    }
+
+    /* 🎯 Input Styling */
+    .stTextInput > div > div > input,
+    .stNumberInput input,
+    .stSelectbox select {
+        border-radius: 10px !important;
+        border: 1px solid #004aad !important;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True
+)
+
 
 # -----------------------------
 # Streamlit App
 # -----------------------------
-st.set_page_config(page_title="⚡ Electric Bike Finance Portal", layout="centered")
 st.title("⚡ Electric Bike Finance Portal")
 
-tabs = st.tabs(["📋 Applicant Information", "📊 Evaluation", "✅ Results", "📂 Applicants"])
+tabs = st.tabs(["📋 Applicant Information", "📊 Evaluation", "🎯 Results", "📂 Applicants"])
 
 # -----------------------------
 # Page 1: Applicant Info
@@ -144,19 +443,48 @@ with tabs[0]:
     if cnic and not validate_cnic(cnic):
         st.error("❌ Invalid CNIC format. Use XXXXX-XXXXXXX-X")
 
-    license_suffix = st.text_input("Enter last 3 digits for License Number (#XXX)")
-    license_number = f"{cnic}#{license_suffix}" if validate_cnic(cnic) and license_suffix else ""
+    license_suffix = st.number_input(
+        "Enter last 3 digits for License Number (#XXX)",
+        min_value=0, max_value=999, step=1, format="%03d"
+    )
+    license_number = f"{cnic}#{license_suffix}" if validate_cnic(cnic) else ""
 
-    phone_number = st.text_input("Phone Number (11–12 digits)")
+    phone_number = st.text_input("Phone Number (11 digits only)")
     if phone_number and not validate_phone(phone_number):
-        st.error("❌ Invalid Phone Number - Please enter a valid phone number")
+        st.error("❌ Invalid Phone Number - Please enter exactly 11 digits")
+
+    gender = st.radio("Gender", ["M", "F"])
 
     guarantors = st.radio("Guarantors Available?", ["Yes", "No"])
     female_guarantor = None
     if guarantors == "Yes":
         female_guarantor = st.radio("At least one Female Guarantor?", ["Yes", "No"])
 
-    # Address fields
+    electricity_bill = st.radio("Is Electricity Bill Available?", ["Yes", "No"])
+    if electricity_bill == "No":
+        st.error("🚫 Application Rejected: Electricity bill not available.")
+
+    pdc_option = st.radio("Is the candidate willing to provide post-dated cheques (PDCs)?", ["Yes", "No"])
+    if pdc_option == "No":
+        st.error("🚫 Application Rejected: PDCs not available")
+
+    employment_type = st.selectbox("Employment Type", ["Employed by Organisation", "Self-Employed / Businessman"])
+
+    with st.expander("🎓 Qualifications (Optional)"):
+        education = st.selectbox(
+            "Education",
+            ["", "No Formal Education", "Primary", "Secondary", "Intermediate", "Bachelor's", "Master's", "PhD"]
+        )
+        occupation = st.text_input("Occupation")
+        designation = st.text_input("Designation")
+        employer_name = st.text_input("Employer Name")
+        employer_contact = st.text_input("Employer Contact (11 digits)")
+
+        # Validate employer contact only if entered
+        if employer_contact and not validate_phone(employer_contact):
+            st.error("❌ Invalid Employer Contact - Please enter exactly 11 digits")
+
+
     street_address = st.text_input("Street Address")
     area_address = st.text_input("Area Address")
     city = st.text_input("City")
@@ -179,12 +507,6 @@ with tabs[0]:
         else:
             st.error("❌ Please complete all mandatory address fields before viewing on Maps.")
 
-    gender = st.radio("Gender", ["M", "F"])
-
-    electricity_bill = st.radio("Is Electricity Bill Available?", ["Yes", "No"])
-    if electricity_bill == "No":
-        st.error("🚫 Application Rejected: Electricity bill not available.")
-
     guarantor_valid = (guarantors == "Yes")
     female_guarantor_valid = (female_guarantor == "Yes") if guarantors == "Yes" else True
 
@@ -194,7 +516,7 @@ with tabs[0]:
         st.error("🚫 Application Rejected: At least one female guarantor is required.")
 
     info_complete = all([
-        first_name, last_name, validate_cnic(cnic), license_suffix,
+        first_name, last_name, validate_cnic(cnic),
         guarantor_valid, female_guarantor_valid,
         phone_number and validate_phone(phone_number),
         street_address, area_address, city, state_province, country,
@@ -208,120 +530,339 @@ with tabs[0]:
     else:
         st.warning("⚠️ Please complete all required fields before proceeding.")
 
-# -----------------------------
-# Page 2: Evaluation
-# -----------------------------
+
+# -------------------
+# EVALUATION 
+# -------------------
+# -------------------
+# EVALUATION 
+# -------------------
 with tabs[1]:
     if not st.session_state.get("applicant_valid", False):
         st.error("🚫 Please complete Applicant Information first.")
     else:
         st.subheader("Evaluation Inputs")
 
-        net_salary = st.number_input("Net Salary", min_value=0, step=1000, format="%i")
-        emi = st.number_input("Monthly Installment (EMI)", min_value=0, step=500, format="%i")
-        bank_balance = st.number_input("Average 6M Bank Balance", min_value=0, step=1000, format="%i")
-        salary_consistency = st.number_input("Months with Salary Credit (0–12)", min_value=0, max_value=12, step=1)
-        employer_type = st.selectbox("Employer Type", ["Govt", "MNC", "SME", "Startup"])
-        job_years = st.number_input("Job Tenure (Years)", min_value=0, step=1, format="%i")
-        age = st.number_input("Age", min_value=18, max_value=70, step=1, format="%i")
-        dependents = st.number_input("Number of Dependents", min_value=0, step=1, format="%i")
-        residence = st.radio("Residence", ["Owned", "Rented"])
-        bike_type = st.selectbox("Bike Type", ["EV-1", "EV-125"])
-        bike_price = st.number_input("Bike Price", min_value=0, step=1000, format="%i")
-        outstanding = st.number_input("Other Loans (Outstanding)", min_value=0, step=1000, format="%i")
+        def formatted_number_input(label, key, optional=False):
+            raw_key = f"{key}_raw"
+            raw_val = st.session_state.get(raw_key, "")
 
-        st.info("➡️ Once inputs are completed, check the Results tab for scoring and decision.")
+            # Basic input (no commas while typing)
+            input_val = st.text_input(label, value=raw_val, key=raw_key)
 
-# -----------------------------
-# Page 3: Results
-# -----------------------------
+            # Keep only digits
+            clean_val = re.sub(r"[^\d]", "", input_val)
+
+            # Convert to number
+            num = int(clean_val) if clean_val else (0 if not optional else None)
+
+            # Display formatted version below
+            if clean_val:
+                st.caption(f"💰 **Formatted:** {num:,}")
+
+            return num
+
+        # Branch based on employment type
+        if employment_type == "Employed by Organisation":
+            # --- existing employed inputs (unchanged) ---
+            net_salary = formatted_number_input("Net Salary (PKR)", key="net_salary")
+            applicant_bank_balance = formatted_number_input(
+                "Applicant's Average 6M Bank Balance (PKR)", key="applicant_bank_balance"
+            )
+            guarantor_bank_balance = formatted_number_input(
+                "Guarantor's Average 6M Bank Balance (Optional, PKR)", key="guarantor_bank_balance", optional=True
+            )
+
+            salary_consistency = st.number_input("Months with Salary Credit (0–6)", min_value=0, max_value=6, step=1)
+            employer_type = st.selectbox("Employer Type", ["Govt", "MNC", "Private Limited", "SME", "Startup", "Self-employed"])
+            age = st.number_input("Age", min_value=18, max_value=70, step=1)
+            job_years = st.number_input("Job Tenure (Years)", min_value=0, step=1)
+            if job_years > age:
+                st.error("❌ Job tenure cannot exceed age. Please correct the values.")
+            dependents = st.number_input("Number of Dependents", min_value=0, step=1)
+            residence = st.radio("Residence", ["Owned", "Family", "Rented", "Temporary"])
+
+            bike_type = st.selectbox("Bike Type", ["EV-1", "EV-125"])
+
+            financing_plans = {
+                "1 Year Plan": {"upfront": 60000, "installment": 25500, "tenure": 12},
+                "2 Year Plan": {"upfront": 40000, "installment": 14900, "tenure": 24},
+                "3 Year Plan": {"upfront": 40000, "installment": 9900, "tenure": 36},
+            }
+            selected_plan = st.selectbox("Financing Plan", list(financing_plans.keys()))
+            plan = financing_plans[selected_plan]
+            bike_price = plan["upfront"] + plan["installment"] * plan["tenure"]
+            emi = plan["installment"]
+            tenure = plan["tenure"]
+            down_payment = plan["upfront"]
+
+            with st.container():
+                st.markdown("💳 Financing Plan Details")
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.metric("Down Payment / Upfront", f"Rs. {down_payment:,}")
+                    st.metric("Installment Amount", f"Rs. {emi:,}")
+                with col2:
+                    st.metric("Tenure (Months)", f"{tenure}")
+                    st.metric("Total Bike Price", f"Rs. {bike_price:,}")
+
+            outstanding = st.number_input("Outstanding Obligation", min_value=0, step=1000)
+            st.info(f"💡 EMI to be used for scoring: {emi:,}")
+
+        else:
+            # --- Self-Employed / Businessman inputs ---
+            st.info("Self-Employed applicant: Salary, employer and tenure fields are not required.")
+            # Primary liquidity input
+            applicant_bank_balance = formatted_number_input(
+                "Applicant's Average 6M Bank Balance (PKR)", key="applicant_bank_balance"
+            )
+            # Keep guarantor optional but it's not used for scoring per your rule
+            guarantor_bank_balance = formatted_number_input(
+                "Guarantor's Average 6M Bank Balance (Optional, PKR)", key="guarantor_bank_balance", optional=True
+            )
+
+            # Basic personal & stability inputs
+            age = st.number_input("Age", min_value=18, max_value=99, step=1)
+            dependents = st.number_input("Number of Dependents", min_value=0, step=1)
+            residence = st.radio("Residence", ["Owned", "Family", "Rented", "Temporary"])
+
+            bike_type = st.selectbox("Bike Type", ["EV-1", "EV-125"])
+
+            financing_plans = {
+                "1 Year Plan": {"upfront": 60000, "installment": 25500, "tenure": 12},
+                "2 Year Plan": {"upfront": 40000, "installment": 14900, "tenure": 24},
+                "3 Year Plan": {"upfront": 40000, "installment": 9900, "tenure": 36},
+            }
+            selected_plan = st.selectbox("Financing Plan", list(financing_plans.keys()))
+            plan = financing_plans[selected_plan]
+            bike_price = plan["upfront"] + plan["installment"] * plan["tenure"]
+            emi = plan["installment"]
+            tenure = plan["tenure"]
+            down_payment = plan["upfront"]
+
+            with st.container():
+                st.markdown("💳 Financing Plan Details")
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.metric("Down Payment / Upfront", f"Rs. {down_payment:,}")
+                    st.metric("Installment Amount", f"Rs. {emi:,}")
+                with col2:
+                    st.metric("Tenure (Months)", f"{tenure}")
+                    st.metric("Total Bike Price", f"Rs. {bike_price:,}")
+
+            outstanding = st.number_input("Outstanding Obligation", min_value=0, step=1000)
+            st.info(f"💡 EMI to be used for scoring: {emi:,} -- For self-employed the bank-balance rule is >= 6×EMI to get bank score 100.")
+
+
+
+# -------------------
+# RESULTS (Reactive)
+# -------------------
+# ------------------- (inside Results block)
 with tabs[2]:
     if not st.session_state.get("applicant_valid", False):
         st.error("🚫 Please complete Applicant Information first.")
     else:
-        st.subheader("📊 Results Summary")
+        st.subheader("🎯 Results Summary")
 
-        if st.session_state.get("applicant_valid") and 'net_salary' in locals() and net_salary > 0 and 'emi' in locals() and emi > 0:
-            inc = income_score(net_salary, gender)
-            bal = bank_balance_score(bank_balance, emi)
-            sal = salary_consistency_score(salary_consistency)
-            emp = employer_type_score(employer_type)
-            job = job_tenure_score(job_years)
-            ag = age_score(age)
-            dep = dependents_score(dependents)
-            res = residence_score(residence)
-            dti, ratio = dti_score(outstanding, bike_price, net_salary)
+        # ensure emi and tenure exist
+        try:
+            emi  # defined in evaluation
+            tenure
+        except NameError:
+            st.error("🚫 Please go to Evaluation tab and select a financing plan.")
+        else:
+            # For employed case (unchanged existing logic)
+            if employment_type == "Employed by Organisation":
+                # --- Calculate Scores (existing functions) ---
+                inc = income_score(net_salary, gender)
+                bal, bal_source = bank_balance_score_custom(applicant_bank_balance, guarantor_bank_balance, emi)
+                sal = salary_consistency_score(salary_consistency)
+                emp = employer_type_score(employer_type)
+                job = job_tenure_score(job_years)
+                ag = age_score(age)
+                dep = dependents_score(dependents)
+                res = residence_score(residence)
+                dti, ratio = dti_score(outstanding, emi, net_salary, tenure)
 
-            final = (
-                inc * 0.40 + bal * 0.30 + sal * 0.04 + emp * 0.04 +
-                job * 0.04 + ag * 0.04 + dep * 0.04 + res * 0.05 + dti * 0.05
-            )
+                final_score = (
+                    inc * 0.40 + bal * 0.30 + sal * 0.04 + emp * 0.04 +
+                    job * 0.04 + ag * 0.04 + dep * 0.04 + res * 0.05 +
+                    dti * 0.05
+                )
 
-            if final >= 75:
-                decision = "✅ Approve"
-            elif final >= 60:
-                decision = "🟡 Review"
+                # Decision thresholds unchanged
+                if ag == -1:
+                    decision = "Reject"
+                    decision_display = "❌ Reject (Underage)"
+                else:
+                    if final_score >= 75:
+                        decision = "Approved"
+                        decision_display = "✅ Approve"
+                    elif final_score >= 60:
+                        decision = "Review"
+                        decision_display = "🟡 Review"
+                    else:
+                        decision = "Reject"
+                        decision_display = "❌ Reject"
+
+                # Display scores (same layout as before)
+                st.markdown("### 🔹 Detailed Scores")
+                st.write(f"Income Score: {inc:.1f}")
+                st.write(f"Bank Balance Score ({bal_source}): {bal:.1f}")
+                st.write(f"Salary Consistency: {sal:.1f}")
+                st.write(f"Employer Type Score: {emp:.1f}")
+                st.write(f"Job Tenure Score: {job:.1f}")
+                st.write(f"Age Score: {ag:.1f}")
+                st.write(f"Dependents Score: {dep:.1f}")
+                st.write(f"Residence Score: {res:.1f}")
+                st.write(f"Debt-to-Income Ratio: {ratio:.2f}")
+                st.write(f"Debt-to-Income Score: {dti:.1f}")
+                st.write(f"EMI used for scoring: {emi}")
+                st.write(f"Final Score: {final_score:.1f}")
+                st.subheader(f"🏆 Decision: {decision_display}")
+
+                # (Keep the existing bank-balance rejection messages for employed case)
+                if bal == 0:
+                    messages = []
+                    if applicant_bank_balance is not None and applicant_bank_balance < 3 * emi:
+                        messages.append(
+                            f"Applicant bank balance Rs. {applicant_bank_balance:,.0f} "
+                            f"< required bank balance Rs. {3 * emi:,.0f} (3×EMI)"
+                        )
+                    if guarantor_bank_balance is not None and guarantor_bank_balance < 6 * emi:
+                        messages.append(
+                            f" Guarantor bank balance Rs. {guarantor_bank_balance:,.0f} "
+                            f"< required guarantor bank balance Rs. {6 * emi:,.0f} (6×EMI)"
+                        )
+                    if messages:
+                        st.markdown("Bank Balance Criteria Not Met")
+                        for msg in messages:
+                            st.markdown(
+                                f'<div style="background-color: #fff3cd; border-left: 6px solid #ffeb3b; '
+                                f'padding: 10px; border-radius: 8px; margin-bottom: 8px;">'
+                                f'⚠️ <b>{msg}</b></div>',
+                                unsafe_allow_html=True
+                            )
+
             else:
-                decision = "❌ Reject"
+                # --- Self-Employed scoring per your spec ---
+                # Bank balance uses binary rule: >=6*EMI => 100 else 0
+                bal, bal_source = bank_balance_score_business(applicant_bank_balance, emi)
 
-            st.markdown("### 🔹 Detailed Scores")
-            st.write(f"**Income Score (with gender adj.):** {inc:.1f}")
-            st.write(f"**Bank Balance Score (vs. 3× EMI):** {bal:.1f}")
-            st.write(f"**Salary Consistency Score:** {sal:.1f}")
-            st.write(f"**Employer Type Score:** {emp:.1f}")
-            st.write(f"**Job Tenure Score:** {job:.1f}")
-            st.write(f"**Age Score:** {ag:.1f}")
-            st.write(f"**Dependents Score:** {dep:.1f}")
-            st.write(f"**Residence Score:** {res:.1f}")
-            st.write(f"**Debt-to-Income Ratio:** {ratio:.2f}")
-            st.write(f"**Debt-to-Income Score:** {dti:.1f}")
-            st.write(f"**Final Score:** {final:.1f}")
-            st.subheader(f"🏆 Decision: {decision}")
+                # compute other component scores using existing helper functions
+                ag = age_score(age)
+                dep = dependents_score(dependents)
+                res = residence_score(residence)
+                # DTI: note dti_score requires net_salary for ratio calculation; for self-employed we still compute ratio as (outstanding/tenure + emi) / (net_salary or a proxy)
+                # We'll compute DTI using net_salary if given, otherwise treat net_salary=1 to avoid division by zero (and limit score low if no salary)
+                # But per your spec DTI must be used; if no net_salary available, dti_score will return (0,0) — which penalizes applicant.
+                dti, ratio = dti_score(outstanding, emi, net_salary if 'net_salary' in locals() else 1, tenure)
 
-            st.markdown("### 📌 Decision Reasons")
-            reasons = []
-            if inc < 60:
-                reasons.append("• Moderate to low income level.")
-            if bal >= 100:
-                reasons.append("• Bank balance fully meets requirement (≥ 3× EMI).")
-            else:
-                reasons.append("• Bank balance below recommended 3× EMI.")
-            if dti < 70:
-                reasons.append("• High debt-to-income ratio, risky.")
-            if final >= 75:
-                reasons.append("• Profile fits approval criteria.")
-            for r in reasons:
-                st.write(r)
+                # Weights: bank 70%, age 7%, dependents 7%, residence 8%, dti 8%
+                final_score = (
+                    bal * 0.70 + ag * 0.07 + dep * 0.07 + res * 0.08 + dti * 0.08
+                )
 
-            if decision == "✅ Approve":
+                # Decision thresholds: reuse same thresholds (>=75 approve, >=60 review)
+                if ag == -1:
+                    decision = "Reject"
+                    decision_display = "❌ Reject (Underage)"
+                else:
+                    if final_score >= 75:
+                        decision = "Approved"
+                        decision_display = "✅ Approve"
+                    elif final_score >= 60:
+                        decision = "Review"
+                        decision_display = "🟡 Review"
+                    else:
+                        decision = "Reject"
+                        decision_display = "❌ Reject"
+
+                # Display self-employed specific scores
+                st.markdown("### 🔹 Detailed Scores (Self-Employed)")
+                st.write(f"Bank Balance Score ({bal_source}): {bal:.1f}")
+                st.write(f"Age Score: {ag:.1f}")
+                st.write(f"Dependents Score: {dep:.1f}")
+                st.write(f"Residence Score: {res:.1f}")
+                st.write(f"Debt-to-Income Ratio: {ratio:.2f}")
+                st.write(f"Debt-to-Income Score: {dti:.1f}")
+                st.write(f"EMI used for scoring: {emi}")
+                st.write(f"Final Score: {final_score:.1f}")
+                st.subheader(f"🏆 Decision: {decision_display}")
+
+                # For self-employed, give explicit bank-balance rejection guidance
+                if bal == 0:
+                    st.markdown(
+                        f'<div style="background-color: #fff3cd; border-left: 6px solid #ffeb3b; '
+                        f'padding: 10px; border-radius: 8px; margin-bottom: 8px;">'
+                        f'⚠️ <b>Applicant bank balance Rs. {applicant_bank_balance if applicant_bank_balance is not None else 0:,.0f} '
+                        f'is less than required Rs. {6 * emi:,.0f} (6×EMI). Applicant needs >= 6×EMI to qualify.</b></div>',
+                        unsafe_allow_html=True
+                    )
+
+            # --- Financial Plan display & Save button (common to both) ---
+            if decision in ["Approved", "Review", "Reject"]:
+                st.markdown("### 💰 Applicant Financial Plan")
+                remaining_price = bike_price - down_payment
+                total_payment = emi * tenure
+                break_even = down_payment + total_payment
+                st.write(f"**Bike Price:** {bike_price:,.0f}")
+                st.write(f"**Down Payment:** {down_payment:,.0f}")
+                st.write(f"**Remaining Bike Price after Down Payment:** {remaining_price:,.0f}")
+                st.write(f"**Installment Tenure (Months):** {tenure}")
+                st.write(f"**Monthly EMI:** {emi:,.0f}")
+                st.write(f"**Total EMI over Tenure:** {total_payment:,.0f}")
+                st.write(f"**Total Paid Towards Bike (Down Payment + EMIs):** {break_even:,.0f}")
+
+                # Save to DB (keep behavior — you may want to restrict Save button to Approved only, but leaving as-is)
                 if st.button("💾 Save Applicant to Database"):
                     try:
-                        save_to_db({
+                        applicant_data = {
                             "first_name": first_name,
                             "last_name": last_name,
                             "cnic": cnic,
                             "license_no": license_number,
-                            "guarantors": guarantors,
-                            "female_guarantor": female_guarantor if female_guarantor else "No",
                             "phone_number": phone_number,
+                            "gender": gender,
+                            "guarantors": guarantors,
+                            "female_guarantor": female_guarantor,
+                            "electricity_bill": electricity_bill,
+                            "pdc_option": pdc_option,
+                            "education": education,
+                            "occupation": occupation,
+                            "designation": designation,
+                            "employer_name": employer_name if 'employer_name' in locals() else None,
+                            "employer_contact": employer_contact if 'employer_contact' in locals() else None,
                             "street_address": street_address,
                             "area_address": area_address,
                             "city": city,
                             "state_province": state_province,
                             "postal_code": postal_code,
                             "country": country,
-                            "gender": gender,
-                            "electricity_bill": electricity_bill,
-                            "net_salary": net_salary,
-                            "emi": emi,
+                            "net_salary": net_salary if 'net_salary' in locals() else None,
+                            "applicant_bank_balance": applicant_bank_balance,
+                            "guarantor_bank_balance": guarantor_bank_balance if 'guarantor_bank_balance' in locals() else None,
+                            "employer_type": employer_type if 'employer_type' in locals() else None,
+                            "age": age,
+                            "residence": residence,
                             "bike_type": bike_type,
                             "bike_price": bike_price,
-                        })
-                        st.success("✅ Applicant information saved to database successfully!")
+                            "down_payment": down_payment,
+                            "tenure": tenure,
+                            "emi": emi,
+                            "outstanding": outstanding,
+                            "decision": decision
+                        }
+
+                        save_to_db(applicant_data)
+                        st.success("✅ Applicant saved successfully!")
                     except Exception as e:
                         st.error(f"❌ Failed to save applicant: {e}")
-        else:
-            st.warning("⚠️ Complete Evaluation inputs first")
+
+
+
+
 
 # -----------------------------
 # Page 4: Applicants
@@ -330,14 +871,58 @@ with tabs[3]:
     st.subheader("📂 Applicants Database")
 
     if st.button("🔄 Refresh Data"):
+        resequence_ids()
         st.session_state.refresh = True
+
+    def delete_applicant(applicant_id: int):
+        try:
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM data WHERE id = %s", (applicant_id,))
+            conn.commit()
+            cursor.close()
+            conn.close()
+            st.success(f"✅ Applicant with ID {applicant_id} deleted successfully!")
+        except Exception as e:
+            st.error(f"❌ Failed to delete applicant: {e}")
 
     try:
         df = fetch_all_applicants()
         if not df.empty:
             st.dataframe(df, use_container_width=True)
 
-            # 📥 Download Excel Button
+            delete_id = st.number_input("Enter Applicant ID to Delete", min_value=1, step=1)
+
+            # 🔹 NEW: Two-step confirmation logic
+            if "confirm_delete" not in st.session_state:
+                st.session_state.confirm_delete = None
+
+            if st.button("🗑️ Delete Applicant"):
+                if delete_id in df["id"].values:
+                    # Store selected ID + Name for confirmation
+                    applicant_name = df.loc[df["id"] == delete_id, "name"].values[0]
+                    st.session_state.confirm_delete = {"id": delete_id, "name": applicant_name}
+                else:
+                    st.error("❌ Invalid ID. Please enter a valid Applicant ID from the table.")
+
+            # Show confirmation prompt if a delete is triggered
+            if st.session_state.confirm_delete:
+                c_id = st.session_state.confirm_delete["id"]
+                c_name = st.session_state.confirm_delete["name"]
+                st.warning(f"⚠️ Are you sure you want to delete the data for ID: {c_id} and Name: {c_name}?")
+
+                col1, col2 = st.columns(2)
+                with col1:
+                    if st.button("✅ Yes, Delete"):
+                        delete_applicant(c_id)
+                        st.session_state.confirm_delete = None  # reset confirmation
+                with col2:
+                    if st.button("❌ No, Cancel"):
+                        st.info("Deletion cancelled.")
+                        st.session_state.confirm_delete = None  # reset confirmation
+
+            # Excel download remains the same
+            df = df.sort_values(by="id", ascending=True)
             output = BytesIO()
             with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
                 df.to_excel(writer, index=False, sheet_name="Applicants")
