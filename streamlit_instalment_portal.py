@@ -536,18 +536,20 @@ with tabs[1]:
         applicant_type = st.session_state.get("applicant_type", "Employee")
 
         # Dynamic labels based on applicant type
+        # Dynamic labels based on applicant type
         if applicant_type == "Businessman":
             salary_label = "Net Profit (PKR)"
             consistency_label = "Months with Revenue Generated (0–6)"
             tenure_label = "Business Years"
-            if st.session_state.get("applicant_type") == "Applicant is a businessman":
-                tax_return = st.radio("Evidence of Tax Return?", ["Yes", "No"], key="tax_return")
-                st.session_state["tax_return"] = tax_return
 
+    # 🔹 Show Evidence of Tax Return question
+            tax_return = st.radio("Evidence of Tax Return?", ["Yes", "No"], key="tax_return")
+            st.session_state["tax_return"] = tax_return
         else:
             salary_label = "Net Salary (PKR)"
             consistency_label = "Months with Salary Credit (0–6)"
             tenure_label = "Job Tenure (Years)"
+
 
         # ✅ Smooth, lag-free number input (shows formatted value below)
         def formatted_number_input(label, key, optional=False):
