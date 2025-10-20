@@ -610,119 +610,119 @@ with tabs[1]:
        # -----------------------------
 # Self-Employed / Businessman Evaluation
 # -----------------------------
-elif employment_type == "Self-Employed / Businessman":
-    st.subheader("Business / Self-Employed Applicant Evaluation")
+        elif employment_type == "Self-Employed / Businessman":
+            st.subheader("Business / Self-Employed Applicant Evaluation")
 
     # Inputs
-    net_salary = formatted_number_input("Monthly Net Profit (PKR)", key="net_salary")
-    applicant_bank_balance = formatted_number_input(
-        "Applicant’s Average 6-Month Bank Balance (PKR)", key="applicant_bank_balance"
-    )
-    guarantor_bank_balance = formatted_number_input(
-        "Guarantor’s Average 6-Month Bank Balance (Optional, PKR)", key="guarantor_bank_balance", optional=True
-    )
+            net_salary = formatted_number_input("Monthly Net Profit (PKR)", key="net_salary")
+            applicant_bank_balance = formatted_number_input(
+                "Applicant’s Average 6-Month Bank Balance (PKR)", key="applicant_bank_balance"
+            )
+            guarantor_bank_balance = formatted_number_input(
+                "Guarantor’s Average 6-Month Bank Balance (Optional, PKR)", key="guarantor_bank_balance", optional=True
+            )
 
-    job_tenure_years = st.number_input("Years in Business", min_value=0, step=1)
-    dependents = st.number_input("Number of Dependents", min_value=0, step=1)
-    age = st.number_input("Applicant Age", min_value=18, max_value=75, step=1)
-    residence = st.radio("Residence Type", ["Owned", "Family", "Rented", "Temporary"])
-    employer_type = st.selectbox(
-        "Business Type", ["Registered Company", "Sole Proprietorship", "Partnership", "Other"]
-    )
+            job_tenure_years = st.number_input("Years in Business", min_value=0, step=1)
+            dependents = st.number_input("Number of Dependents", min_value=0, step=1)
+            age = st.number_input("Applicant Age", min_value=18, max_value=75, step=1)
+            residence = st.radio("Residence Type", ["Owned", "Family", "Rented", "Temporary"])
+            employer_type = st.selectbox(
+                "Business Type", ["Registered Company", "Sole Proprietorship", "Partnership", "Other"]
+            )
 
     # Financing Plan
-    bike_type = st.selectbox("Bike Type", ["EV-1", "EV-125"])
+            bike_type = st.selectbox("Bike Type", ["EV-1", "EV-125"])
 
-    financing_plans = {
-        "1 Year Plan": {"upfront": 60000, "installment": 25500, "tenure": 12},
-        "2 Year Plan": {"upfront": 40000, "installment": 14900, "tenure": 24},
-        "3 Year Plan": {"upfront": 40000, "installment": 9900, "tenure": 36},
-    }
+            financing_plans = {
+                "1 Year Plan": {"upfront": 60000, "installment": 25500, "tenure": 12},
+                "2 Year Plan": {"upfront": 40000, "installment": 14900, "tenure": 24},
+                "3 Year Plan": {"upfront": 40000, "installment": 9900, "tenure": 36},
+            }
 
-    selected_plan = st.selectbox("Financing Plan", list(financing_plans.keys()))
-    plan = financing_plans[selected_plan]
-    bike_price = plan["upfront"] + plan["installment"] * plan["tenure"]
-    emi = plan["installment"]
-    tenure = plan["tenure"]
-    down_payment = plan["upfront"]
+            selected_plan = st.selectbox("Financing Plan", list(financing_plans.keys()))
+            plan = financing_plans[selected_plan]
+            bike_price = plan["upfront"] + plan["installment"] * plan["tenure"]
+            emi = plan["installment"]
+            tenure = plan["tenure"]
+            down_payment = plan["upfront"]
 
-    with st.container():
-        st.markdown("💳 **Financing Plan Details**")
-        col1, col2 = st.columns(2)
-        with col1:
-            st.metric("Down Payment / Upfront", f"Rs. {down_payment:,}")
-            st.metric("Installment Amount", f"Rs. {emi:,}")
-        with col2:
-            st.metric("Tenure (Months)", f"{tenure}")
-            st.metric("Total Bike Price", f"Rs. {bike_price:,}")
+            with st.container():
+                st.markdown("💳 **Financing Plan Details**")
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.metric("Down Payment / Upfront", f"Rs. {down_payment:,}")
+                    st.metric("Installment Amount", f"Rs. {emi:,}")
+                with col2:
+                    st.metric("Tenure (Months)", f"{tenure}")
+                    st.metric("Total Bike Price", f"Rs. {bike_price:,}")
 
-    outstanding = st.number_input("Outstanding Obligation (PKR)", min_value=0, step=1000)
-    st.info(f"💡 EMI to be used for scoring: {emi:,}")
+            outstanding = st.number_input("Outstanding Obligation (PKR)", min_value=0, step=1000)
+            st.info(f"💡 EMI to be used for scoring: {emi:,}")
 
     # ------------------------------------------
     # Score Calculations (Auto - same as employed)
     # ------------------------------------------
-    net_salary_score_val, net_salary_desc = net_salary_score(net_salary)
-    applicant_bal_score_val, applicant_bal_desc = bank_balance_score_applicant(applicant_bank_balance, emi)
-    guarantor_bal_score_val, guarantor_bal_desc = bank_balance_score_guarantor(guarantor_bank_balance, emi)
-    job_tenure_score_val, job_tenure_desc = job_tenure_score(job_tenure_years)
-    dependents_score_val, dependents_desc = dependents_score(dependents)
-    age_score_val, age_desc = age_score(age)
-    residence_score_val, residence_desc = residence_score(residence)
-    employer_type_score_val, employer_type_desc = employer_type_score(employer_type)
-    dti_score_val, dti_ratio = dti_score(outstanding, emi, net_salary, tenure)
+            net_salary_score_val, net_salary_desc = net_salary_score(net_salary)
+            applicant_bal_score_val, applicant_bal_desc = bank_balance_score_applicant(applicant_bank_balance, emi)
+            guarantor_bal_score_val, guarantor_bal_desc = bank_balance_score_guarantor(guarantor_bank_balance, emi)
+            job_tenure_score_val, job_tenure_desc = job_tenure_score(job_tenure_years)
+            dependents_score_val, dependents_desc = dependents_score(dependents)
+            age_score_val, age_desc = age_score(age)
+            residence_score_val, residence_desc = residence_score(residence)
+            employer_type_score_val, employer_type_desc = employer_type_score(employer_type)
+            dti_score_val, dti_ratio = dti_score(outstanding, emi, net_salary, tenure)
 
     # ------------------------------------------
     # Weighted Final Score (Business logic)
     # ------------------------------------------
-    final_score = (
-        net_salary_score_val * 0.40 +
-        applicant_bal_score_val * 0.30 +
-        guarantor_bal_score_val * 0.30 +
-        job_tenure_score_val * 0.06 +
-        dependents_score_val * 0.05 +
-        age_score_val * 0.04 +
-        residence_score_val * 0.05 +
-        employer_type_score_val * 0.05 +
-        dti_score_val * 0.05
-    )
+        final_score = (
+            net_salary_score_val * 0.40 +
+            applicant_bal_score_val * 0.30 +
+            guarantor_bal_score_val * 0.30 +
+            job_tenure_score_val * 0.06 +
+            dependents_score_val * 0.05 +
+            age_score_val * 0.04 +
+            residence_score_val * 0.05 +
+            employer_type_score_val * 0.05 +
+            dti_score_val * 0.05
+        )
 
     # ------------------------------------------
     # Display Results
     # ------------------------------------------
-    st.write("### Evaluation Results")
-    st.write(f"**Net Profit (treated as Net Salary):** {net_salary_desc}")
-    st.write(f"**Applicant Bank Balance:** {applicant_bal_desc}")
-    st.write(f"**Guarantor Bank Balance:** {guarantor_bal_desc}")
-    st.write(f"**Business Years (treated as Job Tenure):** {job_tenure_desc}")
-    st.write(f"**Dependents:** {dependents_desc}")
-    st.write(f"**Age:** {age_desc}")
-    st.write(f"**Residence:** {residence_desc}")
-    st.write(f"**Business Type:** {employer_type_desc}")
-    st.write(f"**DTI Ratio:** {dti_ratio:.2f}% → {dti_score_val*100:.1f}% Score")
+        st.write("### Evaluation Results")
+        st.write(f"**Net Profit (treated as Net Salary):** {net_salary_desc}")
+        st.write(f"**Applicant Bank Balance:** {applicant_bal_desc}")
+        st.write(f"**Guarantor Bank Balance:** {guarantor_bal_desc}")
+        st.write(f"**Business Years (treated as Job Tenure):** {job_tenure_desc}")
+        st.write(f"**Dependents:** {dependents_desc}")
+        st.write(f"**Age:** {age_desc}")
+        st.write(f"**Residence:** {residence_desc}")
+        st.write(f"**Business Type:** {employer_type_desc}")
+        st.write(f"**DTI Ratio:** {dti_ratio:.2f}% → {dti_score_val*100:.1f}% Score")
 
-    st.success(f"### Final Evaluation Score: {final_score*100:.2f}%")
+        st.success(f"### Final Evaluation Score: {final_score*100:.2f}%")
 
     # ------------------------------------------
     # Save to DB
     # ------------------------------------------
-    data = {
-        "applicant_type": "Self-Employed / Businessman",
-        "net_salary": net_salary,
-        "applicant_bank_balance": applicant_bank_balance,
-        "guarantor_bank_balance": guarantor_bank_balance,
-        "job_tenure_years": job_tenure_years,
-        "dependents": dependents,
-        "age": age,
-        "residence": residence,
-        "employer_type": employer_type,
-        "outstanding": outstanding,
-        "emi": emi,
-        "tenure": tenure,
-        "final_score": final_score
-    }
-    save_to_db(data)
-    st.info("Applicant evaluation data saved successfully.")
+        data = {
+            "applicant_type": "Self-Employed / Businessman",
+            "net_salary": net_salary,
+            "applicant_bank_balance": applicant_bank_balance,
+            "guarantor_bank_balance": guarantor_bank_balance,
+            "job_tenure_years": job_tenure_years,
+            "dependents": dependents,
+            "age": age,
+            "residence": residence,
+            "employer_type": employer_type,
+            "outstanding": outstanding,
+            "emi": emi,
+            "tenure": tenure,
+            "final_score": final_score
+        }
+        save_to_db(data)
+        st.info("Applicant evaluation data saved successfully.")
 
 
 
