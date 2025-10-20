@@ -31,7 +31,7 @@ def save_to_db(data: dict):
 
     # Columns in the exact order we will pass values
     columns = [
-        "name", "cnic", "license_no",
+        "applicant_type", "name", "cnic", "license_no",
         "phone_number", "gender",
         "guarantors", "female_guarantor", "electricity_bill", "pdc_option",  
         "education", "occupation", "designation",
@@ -49,6 +49,7 @@ def save_to_db(data: dict):
 
     # Values in the same order as `columns`
     values = (
+        data["applicant_type"],
         full_name, data["cnic"], data["license_no"],
         data["phone_number"], data["gender"],
         data["guarantors"], data["female_guarantor"], data["electricity_bill"], data["pdc_option"],
@@ -78,6 +79,7 @@ def fetch_all_applicants():
     query = """
     SELECT 
         id, 
+        applicant_type,
         name, 
         cnic, 
         license_no,
@@ -421,12 +423,12 @@ tabs = st.tabs(["📋 Applicant Information", "📊 Evaluation", "🎯 Results",
 # -----------------------------
 with tabs[0]:
     st.subheader("Applicant Information")
-    
+
     applicant_type = st.selectbox(
         "Applicant Type",
-        ["Applicant is an employee", "Applicant is a businessman"]
+        ["Applicant is an employee", "Applicant is a businessman"],
+        key="applicant_type"
     )
-    st.session_state["applicant_type"] = applicant_type
 
     first_name = st.text_input("First Name")
     last_name = st.text_input("Last Name")
@@ -770,7 +772,9 @@ with tabs[2]:
                             "tenure": tenure,
                             "emi": emi,
                             "outstanding": outstanding,
-                            "decision": decision
+                            "decision": decision,
+                            "applicant_type": st.session_state.get("applicant_type", "Applicant is an employee"),
+
                         }
 
                         save_to_db(applicant_data)
