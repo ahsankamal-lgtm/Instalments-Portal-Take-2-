@@ -655,6 +655,7 @@ with tabs[2]:
 
             if applicant_type == "Businessman" and tax_return == "No":
                 decision = "Rejected"
+                decision_display = "❌ Rejected (No Tax Return)"
                 st.error("❌ Rejected: No evidence of tax return provided.")
             elif ag == -1:
                 decision = "Reject"
