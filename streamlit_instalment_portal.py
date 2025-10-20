@@ -540,6 +540,10 @@ with tabs[1]:
             salary_label = "Net Profit (PKR)"
             consistency_label = "Months with Revenue Generated (0–6)"
             tenure_label = "Business Years"
+            if st.session_state.get("applicant_type") == "Applicant is a businessman":
+                tax_return = st.radio("Evidence of Tax Return?", ["Yes", "No"], key="tax_return")
+                st.session_state["tax_return"] = tax_return
+
         else:
             salary_label = "Net Salary (PKR)"
             consistency_label = "Months with Salary Credit (0–6)"
@@ -646,7 +650,13 @@ with tabs[2]:
             # --- Final Decision ---
             final_score = 0  # ✅ Prevent NameError if rejected early
 
-            if ag == -1:
+            applicant_type = st.session_state.get("applicant_type", "")
+            tax_return = st.session_state.get("tax_return", "Yes")
+
+            if applicant_type == "Applicant is a businessman" and tax_return == "No":
+                decision = "Rejected"
+                st.error("❌ Rejected: No evidence of tax return provided.")
+            elif ag == -1:
                 decision = "Reject"
                 decision_display = "❌ Reject (Underage)"
             elif bal == 0:
