@@ -426,7 +426,7 @@ with tabs[0]:
 
     applicant_type = st.selectbox(
         "Applicant Type",
-        ["Applicant is an employee", "Applicant is a businessman"],
+        ["Employee", "Businessman"],
         key="applicant_type"
     )
 
@@ -533,10 +533,10 @@ with tabs[1]:
         st.subheader("Evaluation Inputs")
 
         # Get applicant type from previous tab (default to employee if not set)
-        applicant_type = st.session_state.get("applicant_type", "Applicant is an employee")
+        applicant_type = st.session_state.get("applicant_type", "Employee")
 
         # Dynamic labels based on applicant type
-        if applicant_type == "Applicant is a businessman":
+        if applicant_type == "Businessman":
             salary_label = "Net Profit (PKR)"
             consistency_label = "Months with Revenue Generated (0–6)"
             tenure_label = "Business Years"
@@ -773,7 +773,7 @@ with tabs[2]:
                             "emi": emi,
                             "outstanding": outstanding,
                             "decision": decision,
-                            "applicant_type": st.session_state.get("applicant_type", "Applicant is an employee"),
+                            "applicant_type": st.session_state.get("applicant_type", "Employee"),
 
                         }
 
