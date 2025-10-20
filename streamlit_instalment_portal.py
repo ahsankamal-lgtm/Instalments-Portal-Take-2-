@@ -6,6 +6,15 @@ import mysql.connector
 import pandas as pd
 from io import BytesIO
 
+# -----------------------------
+# Helper function for numeric input with consistent formatting
+# -----------------------------
+def formatted_number_input(label, key=None, min_value=0, step=1000):
+    """
+    A wrapper around st.number_input to keep consistent numeric formatting.
+    """
+    value = st.number_input(label, min_value=min_value, step=step, key=key)
+    return value
 
 # -----------------------------
 # Database Connection
@@ -589,7 +598,7 @@ elif employment_type == "Self-Employed / Businessman":
     st.subheader("Business / Self-Employed Applicant Evaluation")
 
     # Inputs (variable names same as employed)
-    net_salary = st.number_input("Monthly Net Profit (PKR)", min_value=0, step=1000, key="net_salary")
+    net_salary = formatted_number_input("Monthly Net Profit (PKR)", key="net_salary")
     applicant_bank_balance = formatted_number_input(
         "Applicant's Average 6M Bank Balance (PKR)", key="applicant_bank_balance"
     )
