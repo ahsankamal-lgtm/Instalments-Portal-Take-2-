@@ -589,7 +589,7 @@ elif employment_type == "Self-Employed / Businessman":
     st.subheader("Business / Self-Employed Applicant Evaluation")
 
     # Inputs (variable names same as employed)
-    net_salary = formatted_number_input("Monthly Net Profit (PKR)", key="net_salary")
+    net_salary = st.number_input("Monthly Net Profit (PKR)", min_value=0, step=1000, key="net_salary")
     applicant_bank_balance = formatted_number_input(
         "Applicant's Average 6M Bank Balance (PKR)", key="applicant_bank_balance"
     )
