@@ -607,7 +607,7 @@ with tabs[1]:
             outstanding = st.number_input("Outstanding Obligation", min_value=0, step=1000)
             st.info(f"💡 EMI to be used for scoring: {emi:,}")
 
-        elif applicant_type == "Self-Employed / Businessman":
+        elif employment_type == "Self-Employed / Businessman":
             st.subheader("Business / Self-Employed Applicant Evaluation")
     # -------------------------
     # Input Fields
