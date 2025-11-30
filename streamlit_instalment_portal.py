@@ -415,7 +415,7 @@ st.markdown(
 # -----------------------------
 st.title("⚡ Electric Bike Finance Portal")
 
-tabs = st.tabs(["📋 Applicant Information", "📊 Evaluation", "🎯 Results", "📂 Applicants", "🤖 Agent"])
+tabs = st.tabs(["📋 Applicant Information", "📊 Evaluation", "🎯 Results", "📂 Applicants", "👾 Agent"])
 
 # -----------------------------
 # Page 1: Applicant Info
@@ -883,7 +883,7 @@ with tabs[3]:
 # Page 5: Agent (Direct Scoring)
 # -----------------------------
 with tabs[4]:
-    st.subheader("🦄 Scoring Agent")
+    st.subheader("👾 Scoring Agent")
 
     # Applicant type & gender
     agent_applicant_type = st.selectbox(
