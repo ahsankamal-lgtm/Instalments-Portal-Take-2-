@@ -415,7 +415,7 @@ st.markdown(
 # -----------------------------
 st.title("⚡ Electric Bike Finance Portal")
 
-tabs = st.tabs(["📋 Applicant Information", "📊 Evaluation", "🎯 Results", "📂 Applicants"])
+tabs = st.tabs(["📋 Applicant Information", "📊 Evaluation", "🎯 Results", "📂 Applicants", "🤖 Agent"])
 
 # -----------------------------
 # Page 1: Applicant Info
@@ -877,3 +877,160 @@ with tabs[3]:
             st.info("ℹ️ No applicants found in the database yet.")
     except Exception as e:
         st.error(f"❌ Failed to load applicants: {e}")
+
+
+# -----------------------------
+# Page 5: Agent (Direct Scoring)
+# -----------------------------
+with tabs[4]:
+    st.subheader("🤖 Scoring Agent")
+
+    # Applicant type & gender
+    agent_applicant_type = st.selectbox(
+        "Applicant Type",
+        ["Employee", "Businessman"],
+        key="agent_applicant_type"
+    )
+    agent_gender = st.radio("Gender", ["M", "F"], key="agent_gender")
+
+    # Dynamic labels (same logic as Evaluation tab)
+    if agent_applicant_type == "Businessman":
+        agent_salary_label = "Net Profit (PKR)"
+        agent_consistency_label = "Months with Revenue Generated (0–6)"
+        agent_tenure_label = "Business Years"
+        agent_tax_return = st.radio("Evidence of Tax Return?", ["Yes", "No"], key="agent_tax_return")
+    else:
+        agent_salary_label = "Net Salary (PKR)"
+        agent_consistency_label = "Months with Salary Credit (0–6)"
+        agent_tenure_label = "Job Tenure (Years)"
+        agent_tax_return = "Yes"  # implicitly yes for employees
+
+    # Reuse formatted input helper with separate keys
+    def agent_formatted_number_input(label, key, optional=False):
+        raw_key = f"{key}_raw"
+        raw_val = st.session_state.get(raw_key, "")
+
+        input_val = st.text_input(label, value=raw_val, key=raw_key)
+        clean_val = re.sub(r"[^\d]", "", input_val)
+        num = int(clean_val) if clean_val else (0 if not optional else None)
+
+        if clean_val:
+            st.caption(f"💰 **Formatted:** {num:,}")
+
+        return num
+
+    # Core financial inputs
+    agent_net_salary = agent_formatted_number_input(agent_salary_label, key="agent_net_salary")
+    agent_applicant_bank_balance = agent_formatted_number_input(
+        "Applicant's Average 6M Bank Balance (PKR)", key="agent_applicant_bank_balance"
+    )
+    agent_guarantor_bank_balance = agent_formatted_number_input(
+        "Guarantor's Average 6M Bank Balance (Optional, PKR)", key="agent_guarantor_bank_balance", optional=True
+    )
+
+    agent_salary_consistency = st.number_input(agent_consistency_label, min_value=0, max_value=6, step=1, key="agent_salary_consistency")
+    agent_employer_type = st.selectbox(
+        "Employer Type",
+        ["Govt", "MNC", "Private Limited", "SME", "Startup", "Self-employed"],
+        key="agent_employer_type"
+    )
+    agent_age = st.number_input("Age", min_value=18, max_value=70, step=1, key="agent_age")
+    agent_job_years = st.number_input(agent_tenure_label, min_value=0, step=1, key="agent_job_years")
+    if agent_job_years > agent_age:
+        st.error("❌ Job tenure cannot exceed age. Please correct the values.")
+    agent_dependents = st.number_input("Number of Dependents", min_value=0, step=1, key="agent_dependents")
+    agent_residence = st.radio("Residence", ["Owned", "Family", "Rented", "Temporary"], key="agent_residence")
+
+    # EMI / Debt inputs
+    agent_emi = st.number_input("Proposed EMI (Monthly Installment)", min_value=0, step=1000, key="agent_emi")
+    agent_tenure = st.number_input("Tenure (Months)", min_value=1, step=1, key="agent_tenure")
+    agent_outstanding = st.number_input("Existing Outstanding Obligation", min_value=0, step=1000, key="agent_outstanding")
+
+    if st.button("🧮 Calculate Agent Score", key="agent_calculate_btn"):
+        if agent_net_salary <= 0 or agent_emi <= 0 or agent_tenure <= 0:
+            st.error("❌ Please enter valid Net Salary/Profit, EMI, and Tenure values.")
+        else:
+            # Individual scores using same logic as main engine
+            a_inc = income_score(agent_net_salary, agent_gender)
+            a_bal, a_bal_source = bank_balance_score_custom(
+                agent_applicant_bank_balance, agent_guarantor_bank_balance, agent_emi
+            )
+            a_sal = salary_consistency_score(agent_salary_consistency)
+            a_emp = employer_type_score(agent_employer_type)
+            a_job = job_tenure_score(agent_job_years)
+            a_ag = age_score(agent_age)
+            a_dep = dependents_score(agent_dependents)
+            a_res = residence_score(agent_residence)
+            a_dti, a_ratio = dti_score(agent_outstanding, agent_emi, agent_net_salary, agent_tenure)
+
+            a_final_score = 0
+            # Decision logic mirrors Results tab
+            if agent_applicant_type == "Businessman" and agent_tax_return == "No":
+                a_decision = "Rejected"
+                a_decision_display = "❌ Rejected (No Tax Return)"
+                st.error("❌ Rejected: No evidence of tax return provided.")
+            elif a_ag == -1:
+                a_decision = "Reject"
+                a_decision_display = "❌ Reject (Underage)"
+            elif a_bal == 0:
+                a_decision = "Reject"
+                a_decision_display = "❌ Reject (Insufficient Bank Balance)"
+            else:
+                a_final_score = (
+                    a_inc * 0.40 + a_bal * 0.30 + a_sal * 0.04 + a_emp * 0.04 +
+                    a_job * 0.04 + a_ag * 0.04 + a_dep * 0.04 + a_res * 0.05 +
+                    a_dti * 0.05
+                )
+                if a_final_score >= 75:
+                    a_decision = "Approved"
+                    a_decision_display = "✅ Approve"
+                elif a_final_score >= 60:
+                    a_decision = "Review"
+                    a_decision_display = "🟡 Review"
+                else:
+                    a_decision = "Reject"
+                    a_decision_display = "❌ Reject"
+
+            # Show detailed scores
+            st.markdown("### 🔹 Agent — Detailed Scores")
+            st.write(f"Income Score: {a_inc:.1f}")
+            st.write(f"Bank Balance Score ({a_bal_source}): {a_bal:.1f}")
+            st.write(f"Salary Consistency: {a_sal:.1f}")
+            st.write(f"Employer Type Score: {a_emp:.1f}")
+            st.write(f"Job Tenure Score: {a_job:.1f}")
+            st.write(f"Age Score: {a_ag:.1f}")
+            st.write(f"Dependents Score: {a_dep:.1f}")
+            st.write(f"Residence Score: {a_res:.1f}")
+            st.write(f"Debt-to-Income Ratio: {a_ratio:.2f}")
+            st.write(f"Debt-to-Income Score: {a_dti:.1f}")
+            st.write(f"EMI used for scoring: {agent_emi}")
+
+            if a_decision == "Reject" and a_final_score == 0:
+                st.write("Final Score: N/A")
+            else:
+                st.write(f"Final Score: {a_final_score:.1f}")
+
+            st.subheader(f"🏆 Agent Decision: {a_decision_display}")
+
+            # Bank balance criteria explanation
+            if a_bal == 0:
+                a_messages = []
+                if agent_applicant_bank_balance is not None and agent_applicant_bank_balance < 3 * agent_emi:
+                    a_messages.append(
+                        f"Applicant bank balance Rs. {agent_applicant_bank_balance:,.0f} "
+                        f"< required bank balance Rs. {3 * agent_emi:,.0f} (3×EMI)"
+                    )
+                if agent_guarantor_bank_balance is not None and agent_guarantor_bank_balance < 6 * agent_emi:
+                    a_messages.append(
+                        f" Guarantor bank balance Rs. {agent_guarantor_bank_balance:,.0f} "
+                        f"< required guarantor bank balance Rs. {6 * agent_emi:,.0f} (6×EMI)"
+                    )
+                if a_messages:
+                    st.markdown("Bank Balance Criteria Not Met (Agent View)")
+                    for msg in a_messages:
+                        st.markdown(
+                            f'<div style="background-color: #fff3cd; border-left: 6px solid #ffeb3b; '
+                            f'padding: 10px; border-radius: 8px; margin-bottom: 8px;">'
+                            f'⚠️ <b>{msg}</b></div>',
+                            unsafe_allow_html=True
+                        )
