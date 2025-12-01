@@ -154,7 +154,7 @@ def income_score(net_salary, gender):
     if net_salary < 50000:
         base = 0
     elif net_salary < 70000:
-        base = 35
+        base = 30
     elif net_salary < 90000:
         base = 40
     elif net_salary < 100000:
