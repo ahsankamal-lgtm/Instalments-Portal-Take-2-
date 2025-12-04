@@ -150,21 +150,50 @@ def validate_phone(phone: str) -> bool:
 # -----------------------------
 # Scoring Functions
 # -----------------------------
-def income_score(net_salary, gender):
-    if net_salary < 50000:
-        base = 0
-    elif net_salary < 70000:
-        base = 30
-    elif net_salary < 90000:
-        base = 40
-    elif net_salary < 100000:
-        base = 50
-    elif net_salary < 120000:
-        base = 60
-    elif net_salary < 150000:
-        base = 80
+def income_score(net_salary, gender, bike_type=None):
+    """
+    If bike_type == 'EV-1', use the special bracket:
+        <35,000  -> 0
+        <50,000  -> 30
+        <70,000  -> 40
+        <90,000  -> 50
+        <110,000 -> 60
+        <130,000 -> 80
+        else     -> 100
+
+    Otherwise, keep your original brackets.
+    """
+    if bike_type == "EV-1":
+        if net_salary < 35000:
+            base = 0
+        elif net_salary < 50000:
+            base = 30
+        elif net_salary < 70000:
+            base = 40
+        elif net_salary < 90000:
+            base = 50
+        elif net_salary < 110000:
+            base = 60
+        elif net_salary < 130000:
+            base = 80
+        else:
+            base = 100
     else:
-        base = 100
+        if net_salary < 50000:
+            base = 0
+        elif net_salary < 70000:
+            base = 30
+        elif net_salary < 90000:
+            base = 40
+        elif net_salary < 100000:
+            base = 50
+        elif net_salary < 120000:
+            base = 60
+        elif net_salary < 150000:
+            base = 80
+        else:
+            base = 100
+
     if gender == "F":
         base *= 1.1
     return min(base, 100)
@@ -644,7 +673,7 @@ with tabs[2]:
 
         if net_salary > 0 and tenure > 0:
             # --- Calculate Scores ---
-            inc = income_score(net_salary, gender)
+            inc = income_score(net_salary, gender, bike_type)
             bal, bal_source = bank_balance_score_custom(applicant_bank_balance, guarantor_bank_balance, emi)
             sal = salary_consistency_score(salary_consistency)
             emp = employer_type_score(employer_type)
