@@ -57,7 +57,7 @@ def save_to_db(data: dict):
         full_address, data["city"], data["state_province"], data["postal_code"], data["country"],
         data["net_salary"], data["applicant_bank_balance"], data.get("guarantor_bank_balance"),
         data["employer_type"], data["age"], data["residence"],
-        data["bike_type"], data["bike_price"], data["down_payment"], data["tenure"], data["emi"],data["outstanding"],
+        data["bike_type"], data["bike_price"], data["down_payment"], data["tenure"], data["emi"], data["outstanding"],
         data["decision"]
     )
 
@@ -569,13 +569,12 @@ with tabs[1]:
             consistency_label = "Months with Revenue Generated (0–6)"
             tenure_label = "Business Years"
 
-    # 🔹 Show Evidence of Tax Return question
+            # 🔹 Show Evidence of Tax Return question
             tax_return = st.radio("Evidence of Tax Return?", ["Yes", "No"], key="tax_return")
         else:
             salary_label = "Net Salary (PKR)"
             consistency_label = "Months with Salary Credit (0–6)"
             tenure_label = "Job Tenure (Years)"
-
 
         # ✅ Smooth, lag-free number input (shows formatted value below)
         def formatted_number_input(label, key, optional=False):
@@ -922,6 +921,13 @@ with tabs[4]:
     )
     agent_gender = st.radio("Gender", ["M", "F"], key="agent_gender")
 
+    # 🚲 Agent Bike Type (for income scoring logic)
+    agent_bike_type = st.selectbox(
+        "Bike Type",
+        ["EV-1", "EV-125"],
+        key="agent_bike_type"
+    )
+
     # Dynamic labels (same logic as Evaluation tab)
     if agent_applicant_type == "Businessman":
         agent_salary_label = "Net Profit (PKR)"
@@ -980,7 +986,7 @@ with tabs[4]:
             st.error("❌ Please enter valid Net Salary/Profit, EMI, and Tenure values.")
         else:
             # Individual scores using same logic as main engine
-            a_inc = income_score(agent_net_salary, agent_gender)
+            a_inc = income_score(agent_net_salary, agent_gender, agent_bike_type)
             a_bal, a_bal_source = bank_balance_score_custom(
                 agent_applicant_bank_balance, agent_guarantor_bank_balance, agent_emi
             )
